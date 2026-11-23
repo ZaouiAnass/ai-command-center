@@ -84,7 +84,7 @@ export const evtLabel = (type: string) => EVT_LABEL[type] ?? type;
 export const evtTone = (type: string) => /failed|conflict/.test(type) ? "text-danger" : /completed|resolved/.test(type) ? "text-success" : /approval|waiting|interrupted/.test(type) ? "text-warning" : "text-fg2";
 function ActivityPanel() {
   const ev = useLiveEvents();
-  return <aside aria-label="Activité en direct" className="w-[320px] shrink-0 border-l border-line bg-sidebar flex flex-col anim-slide"><div className="h-14 px-5 flex items-center border-b border-line font-semibold">Activité en direct</div>
+  return <aside aria-label="Activité en direct" className="w-[320px] max-w-[88vw] shrink-0 border-l border-line bg-sidebar flex flex-col anim-slide max-[1499px]:absolute max-[1499px]:right-0 max-[1499px]:top-0 max-[1499px]:bottom-0 max-[1499px]:z-30 max-[1499px]:shadow-[-18px_0_40px_rgba(0,0,0,.28)]"><div className="h-14 px-5 flex items-center border-b border-line font-semibold">Activité en direct</div>
     <div className="flex-1 overflow-auto p-4 space-y-3">{!ev.length ? <p className="text-muted text-[13px]">Les événements des agents apparaîtront ici en temps réel.</p> : ev.map((e) => <div key={e.id} className="text-[13px]"><div className={`font-medium ${evtTone(e.type)}`}>{evtLabel(e.type)}</div><div className="text-muted text-xs tnum">{e.provider ?? ""} {e.provider ? "· " : ""}{ago(e.ts)}{e.type === "usage.received" && e.payload?.total ? ` · ${new Intl.NumberFormat("fr-FR").format(e.payload.total)} tokens` : ""}</div></div>)}</div></aside>;
 }
 
@@ -132,7 +132,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-[80] focus:m-2 btn">Aller au contenu</a>
     <Sidebar collapsed={collapsed} toggle={() => { store.set("acc.sidebar", collapsed ? "0" : "1"); setCollapsed(!collapsed); }} />
     <div className="flex-1 flex flex-col min-w-0"><Topbar onPalette={() => setPalette(true)} panelOpen={panel} togglePanel={() => { store.set("acc.panel", panel ? "0" : "1"); setPanel(!panel); }} />
-      <div className="flex-1 flex min-h-0"><main id="main" className="flex-1 overflow-auto min-w-0"><ErrorBoundary resetKey={loc.pathname}>{children}</ErrorBoundary></main>{panel && <ActivityPanel />}</div></div>
+      <div className="flex-1 flex min-h-0 relative"><main id="main" className="flex-1 overflow-auto min-w-0"><ErrorBoundary resetKey={loc.pathname}>{children}</ErrorBoundary></main>{panel && <ActivityPanel />}</div></div>
     <CommandPalette open={palette} onClose={() => setPalette(false)} />
   </div>;
 }

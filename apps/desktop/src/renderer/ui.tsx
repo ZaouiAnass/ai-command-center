@@ -65,7 +65,7 @@ export function Bar({ pct, tone }: { pct: number | null; tone?: string }) {
 export const ProgressIndicator = Bar;
 
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, string][]; value: T; onChange: (v: T) => void }) {
-  return <div role="tablist" className="flex gap-1 border-b border-line mb-4">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={value === k} onClick={() => onChange(k)} className={`px-3 py-2 text-[13px] font-medium -mb-px border-b-2 transition-colors ${value === k ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"}`}>{l}</button>)}</div>;
+  return <div role="tablist" className="flex gap-1 border-b border-line mb-4 overflow-x-auto max-w-full">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={value === k} onClick={() => onChange(k)} className={`shrink-0 whitespace-nowrap px-3 py-2 text-[13px] font-medium -mb-px border-b-2 transition-colors ${value === k ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"}`}>{l}</button>)}</div>;
 }
 export function Segmented<T extends string>({ options, value, onChange, label }: { options: [T, React.ReactNode, string?][]; value: T; onChange: (v: T) => void; label?: string }) {
   return <div role="group" aria-label={label} className="inline-flex p-0.5 rounded-lg bg-bg border border-line">{options.map(([k, l, a]) => <button key={k} aria-pressed={value === k} aria-label={a} title={a} onClick={() => onChange(k)} className={`h-8 px-2.5 text-[13px] rounded-md transition-colors ${value === k ? "bg-raised text-fg" : "text-muted hover:text-fg"}`}>{l}</button>)}</div>;
