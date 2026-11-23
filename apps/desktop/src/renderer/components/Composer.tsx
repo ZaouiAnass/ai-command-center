@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom"; import { ArrowUp, Square, Paperclip, ImagePlus, MonitorUp, ChevronDown, X, Plug, Sparkles } from "lucide-react"; import { api } from "../api";
+import { Link } from "react-router-dom"; import { ArrowUp, Square, Paperclip, ImagePlus, MonitorUp, Globe, ChevronDown, X, Plug, Sparkles } from "lucide-react"; import { api } from "../api";
 import { useData } from "../hooks"; import { StyleSelect } from "./Personalization";
 import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, effortLabel } from "./AIModelConfiguration";
 
@@ -50,7 +50,7 @@ function QuotaMeter({ provider }: { provider: "claude" | "codex" }) {
 }
 
 /** Pastille de configuration : un seul bouton lisible qui ouvre le panneau fournisseur / modèle / effort / permissions. */
-function ModelPill({ mode, cfg, onChange, disabled, convId, style, onStyle }: { mode: Mode; cfg: AIConfig; onChange: (c: AIConfig) => void; disabled?: boolean; convId?: string; style?: string | null; onStyle?: (id: string | null) => void }) {
+function ModelPill({ mode, cfg, onChange, disabled, convId, style, onStyle, web, onWeb }: { mode: Mode; cfg: AIConfig; onChange: (c: AIConfig) => void; disabled?: boolean; convId?: string; style?: string | null; onStyle?: (id: string | null) => void; web?: boolean; onWeb?: (v: boolean) => void }) {
   const [open, setOpen] = useState(false); const [side, setSide] = useState<{ up: boolean; max: number }>({ up: true, max: 480 }); const ref = useRef<HTMLDivElement>(null); const { data: cat } = useData<any>("ai.catalog", [cfg.provider]);
   useEffect(() => { if (!open) return; const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); }; const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }; document.addEventListener("mousedown", down); document.addEventListener("keydown", key, true); return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key, true); }; }, [open]);
   const model = cfg.model ? cat?.models?.find((m: any) => m.id === cfg.model)?.displayName ?? cfg.model : "Modèle par défaut";
@@ -61,16 +61,17 @@ function ModelPill({ mode, cfg, onChange, disabled, convId, style, onStyle }: { 
       {cfg.effort && <span className="hidden md:inline text-muted">· {effortLabel(cfg.effort)}</span>}<ChevronDown size={14} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} /></button>
     {open && <div role="dialog" aria-label="Configuration du modèle" className={`anim-pop absolute left-0 w-[380px] max-w-[88vw] bg-panel border border-line-strong rounded-2xl p-4 z-40 flex flex-col ${side.up ? "bottom-full mb-2" : "top-full mt-2"}`} style={{ boxShadow: "var(--shadow-pop)", maxHeight: side.max }}>
       <div className="flex items-center justify-between mb-3"><span className="font-semibold text-[14px]">Modèle et réglages</span><button className="btn btn-ghost btn-icon !h-7 !w-7" aria-label="Fermer" onClick={() => setOpen(false)}><X size={14} /></button></div>
-      <div className="overflow-auto pr-1 -mr-1 flex-1 min-h-0"><AIModelConfiguration mode={mode} value={cfg} onChange={onChange} />{onStyle && <StyleSelect value={style ?? null} onChange={onStyle} />}</div></div>}</div>;
+      <div className="overflow-auto pr-1 -mr-1 flex-1 min-h-0"><AIModelConfiguration mode={mode} value={cfg} onChange={onChange} />{onStyle && <StyleSelect value={style ?? null} onChange={onStyle} />}
+        {onWeb && <div className="mt-3 pt-3 border-t border-line"><label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--accent)]" checked={!!web} onChange={(e) => onWeb(e.target.checked)} /><span><span className="text-[13px] font-medium flex items-center gap-1.5"><Globe size={14} className="text-accent" />Recherche web</span><span className="text-2xs text-muted block mt-0.5">Permet au modèle de chercher et de lire des pages sur Internet pour cette conversation. Le Chat n'est alors plus « sans outils » : seuls les outils web sont autorisés. Les pages lues consomment des tokens.</span></span></label></div>}</div></div>}</div>;
 }
 
 /**
  * Zone de saisie unique pour Chat, Work et Code : texte extensible, pièces jointes, pastille de modèle,
  * bouton d'envoi rond (flèche) ou d'arrêt (carré) pendant la génération.
  */
-export function Composer({ value, onChange, onSend, onStop, busy, sending, placeholder, mode, cfg, onCfg, attachments, images, onAttach, onImage, onRemoveAttach, onRemoveImage, rows = 2, autoFocus, note, canAttach = true, convId, onDropFiles, onPasteImages, onCapture, styleValue, onStyle }: {
+export function Composer({ value, onChange, onSend, onStop, busy, sending, placeholder, mode, cfg, onCfg, attachments, images, onAttach, onImage, onRemoveAttach, onRemoveImage, rows = 2, autoFocus, note, canAttach = true, convId, onDropFiles, onPasteImages, onCapture, styleValue, onStyle, webValue, onWeb }: {
   value: string; onChange: (v: string) => void; onSend: () => void; onStop?: () => void; busy?: boolean; sending?: boolean; placeholder?: string; mode: Mode; cfg: AIConfig; onCfg: (c: AIConfig) => void;
-  attachments: Attach[]; images: Img[]; onAttach: () => void; onImage: () => void; onRemoveAttach: (i: number) => void; onRemoveImage: (i: number) => void; rows?: number; autoFocus?: boolean; note?: string; canAttach?: boolean; convId?: string; onDropFiles?: (files: File[]) => void; onPasteImages?: (files: File[]) => void; onCapture?: () => void; styleValue?: string | null; onStyle?: (id: string | null) => void;
+  attachments: Attach[]; images: Img[]; onAttach: () => void; onImage: () => void; onRemoveAttach: (i: number) => void; onRemoveImage: (i: number) => void; rows?: number; autoFocus?: boolean; note?: string; canAttach?: boolean; convId?: string; onDropFiles?: (files: File[]) => void; onPasteImages?: (files: File[]) => void; onCapture?: () => void; styleValue?: string | null; onStyle?: (id: string | null) => void; webValue?: boolean; onWeb?: (v: boolean) => void;
 }) {
   const ta = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (autoFocus) ta.current?.focus(); }, [autoFocus]);
@@ -86,12 +87,13 @@ export function Composer({ value, onChange, onSend, onStop, busy, sending, place
     <textarea ref={ta} value={value} onChange={(e) => onChange(e.target.value)} rows={rows} aria-label="Message" disabled={sending}
       onPaste={canAttach && onPasteImages ? (e) => { const files = Array.from(e.clipboardData.items).filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter(Boolean) as File[]; if (files.length && !e.clipboardData.getData("text/plain").trim()) { e.preventDefault(); onPasteImages(files); } } : undefined} placeholder={busy ? "Génération en cours… vous pourrez répondre ensuite." : placeholder ?? "Écrivez votre message…"}
       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (can) onSend(); } }} className="block w-full bg-transparent resize-none outline-none px-5 pt-4 pb-2 text-[15px] leading-7 placeholder:text-muted disabled:opacity-60" style={{ maxHeight: 240 }} />
-    <div className="flex items-center gap-1 px-2.5 pb-2.5">
+    <div className="flex items-center flex-wrap gap-x-1 gap-y-1 px-2.5 pb-2.5">
       {canAttach && <><button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 !rounded-xl" aria-label="Joindre des documents" title="Joindre des documents : PDF, Word, PowerPoint, Excel, HTML, texte, code (convertis en Markdown pour économiser des tokens). Vous pouvez aussi glisser-déposer." disabled={busy} onClick={onAttach}><Paperclip size={17} /></button>
         <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 !rounded-xl" aria-label="Joindre des images" title="Joindre des images (PNG, JPEG, GIF, WebP — 5 Mo, 4 max)" disabled={busy} onClick={onImage}><ImagePlus size={17} /></button>
         {onCapture && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 !rounded-xl" aria-label="Capturer l'écran" title="Capturer l'écran (la fenêtre se masque un instant)" disabled={busy} onClick={onCapture}><MonitorUp size={17} /></button>}</>}
-      <ModelPill mode={mode} cfg={cfg} onChange={onCfg} disabled={busy} convId={convId} style={styleValue} onStyle={onStyle} />
+      <ModelPill mode={mode} cfg={cfg} onChange={onCfg} disabled={busy} convId={convId} style={styleValue} onStyle={onStyle} web={webValue} onWeb={mode === "chat" ? onWeb : undefined} />
       <ExtChip mode={mode} convId={convId} disabled={busy} />
+      {webValue && mode === "chat" && <span className="inline-flex items-center gap-1 h-7 px-2 rounded-full bg-accent-subtle text-accent text-2xs font-medium shrink-0" title="Recherche web activée pour cette conversation"><Globe size={12} />Web</span>}
       {note && <span className="text-2xs text-accent ml-1 hidden md:inline" role="status">{note}</span>}
       <div className="ml-auto flex items-center gap-1 shrink-0"><QuotaMeter provider={cfg.provider} /><span className="hidden 2xl:inline text-2xs text-muted mr-1"><span className="kbd">Entrée</span> pour envoyer</span>
         {busy ? <button type="button" className="h-9 w-9 rounded-full grid place-items-center bg-[var(--danger-subtle)] text-danger hover:bg-[rgba(251,113,133,.25)] transition-colors" aria-label="Arrêter la génération" title="Arrêter" onClick={onStop}><Square size={13} fill="currentColor" /></button>

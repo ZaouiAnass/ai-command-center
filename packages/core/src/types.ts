@@ -59,6 +59,8 @@ export interface RunRequest {
   /** Images jointes (base64) : transmises par les mécanismes officiels de chaque fournisseur. */
   images?: { name: string; mime: string; data: string }[];
   /** Serveurs MCP activés par l'utilisateur pour ce mode/cette conversation. */
+  /** Chat uniquement : autorise la recherche web (WebSearch/WebFetch côté Claude, web_search côté Codex) pour cette exécution. */
+  web?: boolean;
   mcp?: { name: string; transport: "stdio" | "http"; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> }[];
 }
 export interface RunHandle { cancel(): Promise<void>; done: Promise<void> }

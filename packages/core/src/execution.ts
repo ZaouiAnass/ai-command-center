@@ -10,14 +10,16 @@ import { snapshotDir, diffSnapshots } from "./fsnap.js";
 import { ProjectMemory } from "./system.js";
 
 export type ExecMode = "chat" | "work" | "code";
-export interface EnqueueInput { extensions?: { mcp: NonNullable<RunRequest["mcp"]>; skillsText: string }; images?: { name: string; mime: string; data: string }[]; permission?: "read-only" | "workspace-write"; projectId?: string | null; mode?: ExecMode; conversationId?: string | null; cwd?: string; effort?: string | null; systemPrompt?: string; agentId?: string | null; taskId?: string | null; provider?: ProviderId; model?: string | null; prompt: string; priority?: number; resumeSessionId?: string | null; parentExecutionId?: string | null; useWorktree?: boolean }
+/** Outils de recherche web autorisés en Chat quand l'utilisateur l'a activé pour la conversation (et eux seuls). */
+export const WEB_TOOLS = new Set(["WebSearch", "WebFetch", "webSearch"]);
+export interface EnqueueInput { web?: boolean; extensions?: { mcp: NonNullable<RunRequest["mcp"]>; skillsText: string }; images?: { name: string; mime: string; data: string }[]; permission?: "read-only" | "workspace-write"; projectId?: string | null; mode?: ExecMode; conversationId?: string | null; cwd?: string; effort?: string | null; systemPrompt?: string; agentId?: string | null; taskId?: string | null; provider?: ProviderId; model?: string | null; prompt: string; priority?: number; resumeSessionId?: string | null; parentExecutionId?: string | null; useWorktree?: boolean }
 const ACTIVE: ExecStatus[] = ["preparing", "running", "waiting_approval"];
 const TERMINAL: ExecStatus[] = ["completed", "failed", "cancelled", "interrupted"];
 
 interface Live { handle?: RunHandle; cancelRequested: boolean; buf: string; flush?: NodeJS.Timeout; approvals: Map<string, (ok: boolean) => void>; gotError?: string }
 
 export class ExecutionManager {
-  private live = new Map<string, Live>(); private pendingImages = new Map<string, { name: string; mime: string; data: string }[]>(); private pendingExt = new Map<string, { mcp: NonNullable<RunRequest["mcp"]>; skillsText: string }>();
+  private live = new Map<string, Live>(); private pendingImages = new Map<string, { name: string; mime: string; data: string }[]>(); private pendingWeb = new Set<string>(); private pendingExt = new Map<string, { mcp: NonNullable<RunRequest["mcp"]>; skillsText: string }>();
   private normalizer: UsageNormalizer;
   private scheduling = false;
   constructor(private db: DB, private bus: EventBus, private adapters: Record<ProviderId, AgentProviderAdapter>, private statusOf: (p: ProviderId) => Promise<ProviderStatus>, private dataDir: string) { this.normalizer = new UsageNormalizer(db); }
@@ -52,6 +54,7 @@ export class ExecutionManager {
       run(this.db, "INSERT INTO exec_transitions VALUES (?,?,?,?,?,?)", uid(), id, null, "queued", null, now());
       if (i.taskId) run(this.db, "UPDATE tasks SET status='in_progress' WHERE id=? AND status IN ('todo','backlog','blocked')", i.taskId);
     });
+    if (i.web && i.mode === "chat") this.pendingWeb.add(id);
     if (i.images?.length) this.pendingImages.set(id, i.images); if (i.extensions && (i.extensions.mcp.length || i.extensions.skillsText)) this.pendingExt.set(id, i.extensions);
     if (i.useWorktree) run(this.db, "UPDATE agent_executions SET worktree_id='pending' WHERE id=?", id);
     this.bus.emit("execution.queued", { provider, model }, { executionId: id, provider, projectId: i.projectId ?? undefined, agentId: i.agentId ?? undefined, taskId: i.taskId ?? undefined });
@@ -113,7 +116,7 @@ export class ExecutionManager {
       };
       this.transition(id, "running");
       const adapter = this.adapters[ex.provider as ProviderId];
-      const req = { executionId: id, prompt: ex.prompt, cwd, model: ex.model || undefined, permission: permission as any, instructions: instr, resumeSessionId: ex.provider_session_id || undefined, approvalPolicy: (agent?.approval_policy === "on-request" ? "on-request" : "never") as any, policy: mode, effort: ex.effort_requested || undefined, images: this.pendingImages.get(id), mcp: this.pendingExt.get(id)?.mcp };
+      const req = { executionId: id, prompt: ex.prompt, cwd, model: ex.model || undefined, permission: permission as any, instructions: instr, resumeSessionId: ex.provider_session_id || undefined, approvalPolicy: (agent?.approval_policy === "on-request" ? "on-request" : "never") as any, policy: mode, effort: ex.effort_requested || undefined, images: this.pendingImages.get(id), mcp: this.pendingExt.get(id)?.mcp, web: this.pendingWeb.has(id) };
       const before = snapshotDir(cwd); // détection des fichiers modifiés indépendante du fournisseur
       live.handle = adapter.startSession(req, sink, { exclusive });
       await live.handle.done;
@@ -145,7 +148,7 @@ export class ExecutionManager {
         if (l) { l.buf += e.text; if (!l.flush) l.flush = setTimeout(() => this.flush(id), 300); }
         this.bus.emit("execution.text", { text: e.text }, ctx); break;
       case "tool":
-        if (ex.mode === "chat" && e.state === "started" && !(e.name.startsWith("mcp__") && (this.pendingExt.get(id)?.mcp ?? []).some((m) => e.name.startsWith(`mcp__${m.name}__`)))) { // ChatPolicy : aucun outil autorisé → interruption immédiate et trace d'audit
+        if (ex.mode === "chat" && e.state === "started" && !(this.pendingWeb.has(id) && WEB_TOOLS.has(e.name)) && !(e.name.startsWith("mcp__") && (this.pendingExt.get(id)?.mcp ?? []).some((m) => e.name.startsWith(`mcp__${m.name}__`)))) { // ChatPolicy : aucun outil autorisé → interruption immédiate et trace d'audit
           const msg = `Politique Chat : l'outil « ${e.name || "inconnu"} » est interdit en mode Chat. Exécution interrompue.`; this.log(id, "error", msg); if (l) l.gotError = msg;
           run(this.db, "INSERT INTO audit_events (id,type,provider,execution_id,payload,at) VALUES (?,?,?,?,?,?)", uid(), "policy.violation", ex.provider, id, JSON.stringify({ mode: "chat", tool: e.name, summary: e.summary }), now());
           this.notify("warn", "Chat : outil bloqué", msg, "policy"); void this.cancel(id); break;

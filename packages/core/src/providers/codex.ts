@@ -42,6 +42,13 @@ class Rpc {
   }
 }
 
+/** Réglages passés à `thread/start|resume` : serveurs MCP activés par l'utilisateur et, en Chat, état explicite de la recherche web (« disabled » par défaut : sans cela Codex peut chercher sur le web selon sa configuration locale). */
+export function codexConfig(req: RunRequest): Record<string, unknown> | undefined {
+  const cfg: Record<string, unknown> = {};
+  if (req.mcp?.length) cfg.mcp_servers = Object.fromEntries(req.mcp.map((m) => [m.name, m.transport === "http" ? { url: m.url, http_headers: m.headers ?? {}, default_tools_approval_mode: "approve" } : { command: m.command, args: m.args ?? [], env: m.env ?? {}, default_tools_approval_mode: "approve" }]));
+  if (req.policy === "chat") cfg.web_search = req.web ? "live" : "disabled";
+  return Object.keys(cfg).length ? cfg : undefined;
+}
 export class CodexAdapter implements AgentProviderAdapter {
   readonly id = "codex" as const;
   private exe?: string;
@@ -144,7 +151,7 @@ export class CodexAdapter implements AgentProviderAdapter {
         await rpc.request("initialize", { clientInfo: { name: "ai-command-center", title: "AI Command Center", version: "0.1.0" }, capabilities: {} }, 30000);
         rpc.notify("initialized");
         const sandbox = req.permission === "read-only" ? "read-only" : "workspace-write";
-        const base = { cwd: req.cwd, approvalPolicy: req.approvalPolicy === "on-request" ? "on-request" : "never", sandbox, ...(req.model ? { model: req.model } : {}), ...(req.instructions ? { developerInstructions: req.instructions } : {}), ...(req.mcp?.length ? { config: { mcp_servers: Object.fromEntries(req.mcp.map((m) => [m.name, m.transport === "http" ? { url: m.url, http_headers: m.headers ?? {}, default_tools_approval_mode: "approve" } : { command: m.command, args: m.args ?? [], env: m.env ?? {}, default_tools_approval_mode: "approve" }])) } } : {}) };
+        const base = { cwd: req.cwd, approvalPolicy: req.approvalPolicy === "on-request" ? "on-request" : "never", sandbox, ...(req.model ? { model: req.model } : {}), ...(req.instructions ? { developerInstructions: req.instructions } : {}), ...(codexConfig(req) ? { config: codexConfig(req) } : {}) };
         const th = req.resumeSessionId ? await rpc.request("thread/resume", { threadId: req.resumeSessionId, ...base }) : await rpc.request("thread/start", base);
         threadId = th.thread.id; model = th.thread.model ?? model;
         sink.event({ type: "session", providerSessionId: threadId });
