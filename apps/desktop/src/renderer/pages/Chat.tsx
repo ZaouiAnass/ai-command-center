@@ -3,13 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import { Asterisk, ImagePlus, Paperclip, Send, Lightbulb, PenLine, Code2, GraduationCap, MessageSquare } from "lucide-react";
 import { api } from "../api"; import { useData } from "../hooks"; import { toast } from "../overlay";
 import { ErrorState } from "../ui";
-import { AIModelConfiguration, useDefaultConfig, AIConfig, Mode, PROVIDER_LABEL } from "../components/AIModelConfiguration"; import { ConversationList, ConversationView } from "../components/Conversations"; import { Composer, type Attach } from "../components/Composer"; import { useAttachFlow } from "../components/attachFlow"; import { LimitBanner } from "../components/LimitBanner";
+import { AIModelConfiguration, useDefaultConfig, AIConfig, Mode, PROVIDER_LABEL } from "../components/AIModelConfiguration"; import { ConversationList, ConversationView } from "../components/Conversations"; import { Composer, type Attach } from "../components/Composer"; import { useAttachFlow } from "../components/attachFlow"; import { useImageInput } from "../components/imageInput"; import { LimitBanner } from "../components/LimitBanner";
 
 const SUGGESTIONS: [any, string, string][] = [[GraduationCap, "Expliquer un concept", "Explique-moi simplement le fonctionnement de "], [Lightbulb, "Analyser une idée", "Aide-moi à analyser cette idée, avec ses forces et ses risques : "], [PenLine, "Rédiger un texte", "Rédige un texte clair et soigné sur "], [Code2, "Comprendre du code", "Explique ce que fait ce code, étape par étape :\n\n"]];
 
 /** Composer d'un nouvel échange : crée la conversation au premier envoi (aucun projet requis en Chat). */
 export function NewConversationComposer({ mode, projectId, title, subtitle, suggestions = false, onCreated, disabledReason, placeholder }: { mode: Mode; projectId?: string; title: string; subtitle?: string; suggestions?: boolean; onCreated: (id: string) => void; disabledReason?: string; placeholder?: string }) {
-  const [cfg, setCfg, ready] = useDefaultConfig(mode); const [text, setText] = useState(""); const [attach, setAttach] = useState<Attach[]>([]); const af = useAttachFlow(setAttach); const [imgs, setImgs] = useState<{ name: string; mime: string; data: string }[]>([]); const [busy, setBusy] = useState(false); const ta = useRef<HTMLTextAreaElement>(null);
+  const [cfg, setCfg, ready] = useDefaultConfig(mode); const [text, setText] = useState(""); const [attach, setAttach] = useState<Attach[]>([]); const af = useAttachFlow(setAttach); const [imgs, setImgs] = useState<{ name: string; mime: string; data: string }[]>([]); const im = useImageInput(setImgs); const [busy, setBusy] = useState(false); const ta = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { ta.current?.focus(); }, []);
   useEffect(() => { const t = ta.current; if (t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 260) + "px"; } }, [text]);
   const go = async () => {
@@ -23,7 +23,7 @@ export function NewConversationComposer({ mode, projectId, title, subtitle, sugg
       {disabledReason && <p role="alert" className="text-center text-warning text-[13px] mb-4">{disabledReason}</p>}
       <Composer value={text} onChange={setText} onSend={go} busy={false} sending={busy} placeholder={placeholder} mode={mode} cfg={cfg} onCfg={setCfg} rows={3} autoFocus canAttach
         attachments={attach} images={imgs}
-        onAttach={() => void af.add()} onDropFiles={(files) => void af.drop(files, async (paths) => { try { const f = await api("doc.images", paths); if (f?.length) setImgs((i) => [...i, ...f].slice(0, 4)); } catch (e: any) { toast(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error"); } })}
+        onAttach={() => void af.add()} onPasteImages={(f) => void im.paste(f)} onCapture={() => void im.capture()} onDropFiles={(files) => void af.drop(files, async (paths) => { try { const f = await api("doc.images", paths); if (f?.length) setImgs((i) => [...i, ...f].slice(0, 4)); } catch (e: any) { toast(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error"); } })}
         onImage={async () => { try { const f = await api("dialog.images"); if (f?.length) setImgs([...imgs, ...f].slice(0, 4)); } catch (e: any) { toast(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error"); } }}
         onRemoveAttach={(i) => setAttach(attach.filter((_, j) => j !== i))} onRemoveImage={(i) => setImgs(imgs.filter((_, j) => j !== i))} />
       {suggestions && <div className="grid grid-cols-2 gap-2 mt-5">{SUGGESTIONS.map(([I, l, p]) => <button key={l} className="card lift p-3 text-left flex items-center gap-3 cursor-pointer" onClick={() => { setText(p); ta.current?.focus(); }}><I size={16} className="text-muted shrink-0" /><span className="text-[13px]">{l}</span></button>)}</div>}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol, Tray, Menu, nativeImage, globalShortcut } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol, Tray, Menu, nativeImage, globalShortcut, desktopCapturer } from "electron";
 import { randomUUID } from "node:crypto";
 // Aperçus HTML/SVG générés par le modèle : servis par un schéma dédié, avec une politique de sécurité qui autorise les scripts de la page mais aucun accès réseau ; affichés dans un iframe sandbox (origine opaque).
 protocol.registerSchemesAsPrivileged([{ scheme: "acc-artifact", privileges: { standard: true, secure: true } }]);
@@ -65,6 +65,15 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     "ext.importSkillPath": (p: string, modes?: any[]) => { if (!c.system.skills().some((s: any) => s.path === p)) throw new Error("Skill non détectée dans les dossiers connus."); return c.extensions.importSkill(p, modes); },
     "artifact.put": (html: unknown) => { const s = String(html ?? ""); if (s.length > 1_000_000) throw new Error("Aperçu trop volumineux (1 Mo maximum)."); const id = randomUUID(); artifacts.set(id, s); if (artifacts.size > 100) artifacts.delete(artifacts.keys().next().value as string); return id; },
     "file.saveText": async (name: unknown, content: unknown) => { const r = await dialog.showSaveDialog(win!, { defaultPath: String(name ?? "fichier.txt") }); if (r.canceled || !r.filePath) return null; (await import("node:fs")).writeFileSync(r.filePath, String(content ?? ""), "utf8"); return r.filePath; },
+    // Capture de l'écran où se trouve la fenêtre, après l'avoir masquée (sinon l'application se capturerait elle-même).
+    "screen.capture": async () => {
+      const w = win; if (!w || w.isDestroyed()) throw new Error("Fenêtre indisponible."); const disp = screen.getDisplayMatching(w.getBounds()); const wasVisible = w.isVisible() && !w.isMinimized();
+      try { if (wasVisible) { w.hide(); await new Promise((r) => setTimeout(r, 350)); }
+        const sz = { width: Math.min(2560, Math.round(disp.size.width * disp.scaleFactor)), height: Math.min(1600, Math.round(disp.size.height * disp.scaleFactor)) }; const srcs = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: sz });
+        const src = srcs.find((s) => s.display_id === String(disp.id)) ?? srcs[0]; if (!src || src.thumbnail.isEmpty()) throw new Error("Capture impossible (aucun écran détecté).");
+        return { mime: "image/png", data: src.thumbnail.toPNG().toString("base64") };
+      } finally { if (wasVisible) { w.show(); w.focus(); } }
+    },
     // ---- Lanceur global, icône de notification, arrière-plan ----
     "launcher.info": () => ({ packaged: app.isPackaged, shortcut: currentShortcut, shortcutOk, defaultShortcut: DEFAULT_SHORTCUT, keepRunning: !!c.settings.get("app.keepRunning", false), autostart: !!c.settings.get("app.autostart", false) }),
     "app.setShortcut": (accel: unknown) => { const a = String(accel ?? "").trim(); const r = registerShortcut(a); if (r.ok) c.settings.set("app.shortcut", a); return { ...r, shortcut: currentShortcut }; },
