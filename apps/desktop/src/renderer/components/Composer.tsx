@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"; import { ArrowUp, Square, Paperclip, Im
 import { useData } from "../hooks";
 import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, effortLabel } from "./AIModelConfiguration";
 
-export interface Attach { name: string; content: string }
+export interface Attach { name: string; content: string; meta?: { kind: "text" | "converted"; tokens: number; chars: number; truncated: boolean; sourceBytes: number; note?: string } }
 export interface Img { name: string; mime: string; data: string }
 
 /** Extensions (MCP, skills) applicables à la conversation : activées pour le mode, coupables une par une. */
@@ -68,21 +68,25 @@ function ModelPill({ mode, cfg, onChange, disabled, convId }: { mode: Mode; cfg:
  * Zone de saisie unique pour Chat, Work et Code : texte extensible, pièces jointes, pastille de modèle,
  * bouton d'envoi rond (flèche) ou d'arrêt (carré) pendant la génération.
  */
-export function Composer({ value, onChange, onSend, onStop, busy, sending, placeholder, mode, cfg, onCfg, attachments, images, onAttach, onImage, onRemoveAttach, onRemoveImage, rows = 2, autoFocus, note, canAttach = true, convId }: {
+export function Composer({ value, onChange, onSend, onStop, busy, sending, placeholder, mode, cfg, onCfg, attachments, images, onAttach, onImage, onRemoveAttach, onRemoveImage, rows = 2, autoFocus, note, canAttach = true, convId, onDropFiles }: {
   value: string; onChange: (v: string) => void; onSend: () => void; onStop?: () => void; busy?: boolean; sending?: boolean; placeholder?: string; mode: Mode; cfg: AIConfig; onCfg: (c: AIConfig) => void;
-  attachments: Attach[]; images: Img[]; onAttach: () => void; onImage: () => void; onRemoveAttach: (i: number) => void; onRemoveImage: (i: number) => void; rows?: number; autoFocus?: boolean; note?: string; canAttach?: boolean; convId?: string;
+  attachments: Attach[]; images: Img[]; onAttach: () => void; onImage: () => void; onRemoveAttach: (i: number) => void; onRemoveImage: (i: number) => void; rows?: number; autoFocus?: boolean; note?: string; canAttach?: boolean; convId?: string; onDropFiles?: (files: File[]) => void;
 }) {
   const ta = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (autoFocus) ta.current?.focus(); }, [autoFocus]);
   useEffect(() => { const t = ta.current; if (t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 240) + "px"; } }, [value]);
   const can = !!value.trim() && !busy && !sending;
-  return <div className="rounded-[22px] border border-line-strong bg-panel glow-focus">
+  const [over, setOver] = useState(false); const dropOk = canAttach && !!onDropFiles;
+  return <div className={`relative rounded-[22px] border bg-panel glow-focus transition-colors ${over ? "border-accent" : "border-line-strong"}`}
+    onDragOver={dropOk ? (e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } } : undefined} onDragLeave={dropOk ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false); } : undefined}
+    onDrop={dropOk ? (e) => { e.preventDefault(); setOver(false); const fl = Array.from(e.dataTransfer.files); if (fl.length) onDropFiles!(fl); } : undefined}>
+    {over && <div className="absolute inset-0 z-10 rounded-[22px] bg-[var(--accent-subtle)] border-2 border-dashed border-accent grid place-items-center text-[13px] font-medium text-fg pointer-events-none anim-fade">Déposez vos fichiers ici (PDF, Word, Excel, images, texte…)</div>}
     {images.length > 0 && <div className="flex flex-wrap gap-2 px-4 pt-3">{images.map((a, i) => <span key={i} className="relative inline-block"><img src={`data:${a.mime};base64,${a.data}`} alt={a.name} className="h-16 w-16 object-cover rounded-xl border border-line" /><button aria-label={`Retirer ${a.name}`} className="absolute -top-1.5 -right-1.5 bg-raised border border-line-strong rounded-full p-0.5 text-muted hover:text-fg" onClick={() => onRemoveImage(i)}><X size={11} /></button></span>)}</div>}
-    {attachments.length > 0 && <div className="flex flex-wrap gap-1.5 px-4 pt-3">{attachments.map((a, i) => <span key={i} className="inline-flex items-center gap-1.5 text-xs bg-raised border border-line rounded-lg pl-2 pr-1 py-1"><Paperclip size={11} className="text-muted" />{a.name}<button aria-label={`Retirer ${a.name}`} className="text-muted hover:text-fg p-0.5" onClick={() => onRemoveAttach(i)}><X size={12} /></button></span>)}</div>}
+    {attachments.length > 0 && <div className="flex flex-wrap gap-1.5 px-4 pt-3">{attachments.map((a, i) => <span key={i} className="inline-flex items-center gap-1.5 text-xs bg-raised border border-line rounded-lg pl-2 pr-1 py-1"><Paperclip size={11} className="text-muted" />{a.name}{a.meta && <span className={`tnum text-2xs ${a.meta.truncated ? "text-warning" : "text-muted"}`} title={a.meta.kind === "converted" ? `${a.meta.note ?? "Converti en Markdown"} par MarkItDown (Microsoft) : ${Math.round(a.meta.sourceBytes / 1024)} Ko → ≈ ${a.meta.tokens} tokens${a.meta.truncated ? ". Document tronqué." : ""}` : `Texte : ≈ ${a.meta.tokens} tokens`}>{a.meta.kind === "converted" ? "MD · " : ""}≈ {a.meta.tokens >= 1000 ? `${(a.meta.tokens / 1000).toFixed(1)}k` : a.meta.tokens} tok{a.meta.truncated ? " (tronqué)" : ""}</span>}<button aria-label={`Retirer ${a.name}`} className="text-muted hover:text-fg p-0.5" onClick={() => onRemoveAttach(i)}><X size={12} /></button></span>)}</div>}
     <textarea ref={ta} value={value} onChange={(e) => onChange(e.target.value)} rows={rows} aria-label="Message" disabled={sending} placeholder={busy ? "Génération en cours… vous pourrez répondre ensuite." : placeholder ?? "Écrivez votre message…"}
       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (can) onSend(); } }} className="block w-full bg-transparent resize-none outline-none px-5 pt-4 pb-2 text-[15px] leading-7 placeholder:text-muted disabled:opacity-60" style={{ maxHeight: 240 }} />
     <div className="flex items-center gap-1 px-2.5 pb-2.5">
-      {canAttach && <><button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 !rounded-xl" aria-label="Joindre des fichiers texte" title="Joindre des fichiers texte ou de code (200 Ko max chacun)" disabled={busy} onClick={onAttach}><Paperclip size={17} /></button>
+      {canAttach && <><button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 !rounded-xl" aria-label="Joindre des documents" title="Joindre des documents : PDF, Word, PowerPoint, Excel, HTML, texte, code (convertis en Markdown pour économiser des tokens). Vous pouvez aussi glisser-déposer." disabled={busy} onClick={onAttach}><Paperclip size={17} /></button>
         <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 !rounded-xl" aria-label="Joindre des images" title="Joindre des images (PNG, JPEG, GIF, WebP — 5 Mo, 4 max)" disabled={busy} onClick={onImage}><ImagePlus size={17} /></button></>}
       <ModelPill mode={mode} cfg={cfg} onChange={onCfg} disabled={busy} convId={convId} />
       <ExtChip mode={mode} convId={convId} disabled={busy} />

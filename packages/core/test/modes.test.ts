@@ -180,7 +180,7 @@ describe("pièces jointes texte", () => {
     await c.conversations.send(id, "Résume ce fichier", undefined, [{ name: "notes.md", content: "ligne importante" }]); await until(() => c.conversations.messages(id).length === 2);
     expect(r.reqs[0]!.prompt).toMatch(/\[Fichier joint : notes\.md\][\s\S]*ligne importante/); const u = c.conversations.messages(id)[0]; expect(u.content).toMatch(/📎 notes\.md/); expect(u.content).not.toMatch(/ligne importante/);
     await expect(c.conversations.send(id, "x", undefined, [{ name: "bin", content: "a" + String.fromCharCode(0) + "b" }])).rejects.toThrow(/pas un fichier texte/);
-    await expect(c.conversations.send(id, "x", undefined, [{ name: "gros", content: "x".repeat(200_001) }])).rejects.toThrow(/200 Ko/);
+    await expect(c.conversations.send(id, "x", undefined, [{ name: "gros", content: "x".repeat(400_001) }])).rejects.toThrow(/400 000/);
     await expect(c.conversations.send(id, "x", undefined, Array.from({ length: 6 }, (_, i) => ({ name: "f" + i, content: "x" })))).rejects.toThrow(/5 pièces/);
   });
 });

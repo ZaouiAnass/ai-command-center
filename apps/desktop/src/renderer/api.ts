@@ -1,4 +1,4 @@
-export interface AccApi { call(method: string, ...args: unknown[]): Promise<any>; onEvent(cb: (e: any) => void): () => void; onTerminal(cb: (e: { id: string; data?: string; end?: number; exit?: { code: number | null } }) => void): () => void }
+export interface AccApi { call(method: string, ...args: unknown[]): Promise<any>; pathForFile(f: File): string; onEvent(cb: (e: any) => void): () => void; onTerminal(cb: (e: { id: string; data?: string; end?: number; exit?: { code: number | null } }) => void): () => void }
 declare global { interface Window { acc: AccApi } }
 export const api = (m: string, ...a: unknown[]) => window.acc.call(m, ...a);
 export const fmt = (n: number | null | undefined) => n == null ? "—" : new Intl.NumberFormat("fr-FR").format(Math.round(n));

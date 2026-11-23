@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Plus, RefreshCw, Search, Wrench, Plug, Info, Trash2, FlaskConical, FolderInput, AlertTriangle, CheckCircle2, XCircle, Puzzle, Sparkles } from "lucide-react";
+import { Plus, RefreshCw, Search, Wrench, Plug, Info, Trash2, FlaskConical, FolderInput, AlertTriangle, CheckCircle2, XCircle, Puzzle, Sparkles, FileText } from "lucide-react";
 import { api } from "../api"; import { useData } from "../hooks"; import { useT } from "../i18n"; import { toast, confirmDialog } from "../overlay";
+import { ConverterSetupModal } from "../components/attachFlow";
 import { Page, Card, Badge, EmptyState, ErrorState, LoadingSkeleton, Tabs, Skeleton, Modal, Field, Segmented } from "../ui";
 
 type Mode = "chat" | "work" | "code";
@@ -42,10 +43,25 @@ function AddSkill({ open, onClose, onAdded }: { open: boolean; onClose: () => vo
     <div className="mb-2"><span className="label">Utilisable dans</span><ModeChips value={modes} onChange={setModes} /></div>{err && <p role="alert" className="text-danger text-[13px] mt-2">{err}</p>}</Modal>;
 }
 
+function DocConverterCard({ onChanged }: { onChanged: () => void }) {
+  const { data: st, reload } = useData<any>("doc.status", [], { events: /convert/ }); const { data: exts, reload: rx } = useData<any[]>("ext.list", [], { events: /extension/ }); const [setup, setSetup] = useState(false); const [busy, setBusy] = useState(false);
+  const enabled = !!exts?.some((e) => e.name === "markitdown");
+  return <div className="card p-4 mb-5"><div className="flex items-start gap-3"><span className="w-10 h-10 rounded-xl bg-accent-subtle text-accent grid place-items-center shrink-0"><FileText size={19} /></span>
+    <div className="min-w-0 flex-1"><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold">Convertisseur de documents</h3><span className="text-2xs text-muted border border-line rounded px-1.5">Microsoft MarkItDown</span>{st?.installed ? <Badge v="available" text="Installé" /> : <span className="text-2xs text-muted">Non installé</span>}</div>
+      <p className="text-[13px] text-fg2 mt-1">Convertit PDF, Word, PowerPoint, Excel, HTML et EPUB en Markdown avant l'envoi : <b>beaucoup moins de tokens</b> que le fichier brut. Utilisé automatiquement pour les pièces jointes du chat ; vous pouvez aussi le donner aux agents Work et Code.</p>
+      <div className="flex flex-wrap items-center gap-2 mt-3">{!st?.installed ? <button className="btn btn-primary" onClick={() => setSetup(true)}>Installer le convertisseur</button>
+        : enabled ? <span className="inline-flex items-center gap-1.5 text-[13px] text-success"><CheckCircle2 size={15} />Activé pour les agents Work et Code</span>
+        : <button className="btn btn-primary" disabled={busy} onClick={async () => { setBusy(true); try { await api("doc.enableAgents"); toast("Convertisseur activé pour les agents Work et Code.", "success"); rx(); onChanged(); } catch (e: any) { toast(errMsg(e), "error"); } finally { setBusy(false); } }}>Activer pour les agents (Work, Code)</button>}
+        {st?.installed && !enabled && <span className="text-2xs text-muted">Ajoute le serveur MCP « markitdown » (outil convert_to_markdown, y compris pour des URL http) et une skill d'usage.</span>}</div>
+      {st?.error && !st.installed && <p role="alert" className="text-2xs text-danger mt-2">{st.error}</p>}</div></div>
+    {setup && <ConverterSetupModal names={[]} onDone={() => { setSetup(false); reload(); }} />}</div>;
+}
+
 function Mine() {
   const { data: list, err, loading, reload } = useData<any[]>("ext.list", [], { events: /extension/ }); const [mcp, setMcp] = useState(false); const [skill, setSkill] = useState(false); const [tests, setTests] = useState<Record<string, any>>({});
   const test = async (e: any) => { setTests((t) => ({ ...t, [e.id]: { busy: true } })); try { const r = await api("ext.testSaved", e.id); setTests((t) => ({ ...t, [e.id]: { busy: false, ...r } })); } catch (x: any) { setTests((t) => ({ ...t, [e.id]: { busy: false, ok: false, error: errMsg(x) } })); } };
   return <div>
+    <DocConverterCard onChanged={reload} />
     <div className="flex gap-2 mb-4"><button className="btn btn-primary" onClick={() => setMcp(true)}><Plus size={15} />Ajouter un serveur MCP</button><button className="btn" onClick={() => setSkill(true)}><Plus size={15} />Ajouter une skill</button></div>
     {err && !list ? <ErrorState message={err} onRetry={reload} /> : loading && !list ? <LoadingSkeleton rows={3} /> : !list?.length ? <Card><EmptyState icon={Puzzle} title="Aucune extension ajoutée" desc="Ajoutez un serveur MCP (outils externes) ou une skill (instructions réutilisables), puis choisissez où les utiliser : Chat, Work ou Code. Vous pourrez aussi les couper conversation par conversation." action={<div className="flex gap-2"><button className="btn btn-primary" onClick={() => setMcp(true)}>Ajouter un serveur MCP</button><button className="btn" onClick={() => setSkill(true)}>Ajouter une skill</button></div>} /></Card>
       : <div className="grid md:grid-cols-2 gap-3 [&>*]:min-w-0">{list.map((e) => { const t = tests[e.id]; const isMcp = e.kind === "mcp"; return <article key={e.id} className={`card p-4 flex flex-col min-w-0 ${e.enabled ? "" : "opacity-60"}`}>

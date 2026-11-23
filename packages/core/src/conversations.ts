@@ -87,12 +87,13 @@ export class Conversations {
 🖼 ${imgs.map((a) => a.name).join(", ")}` : "") + (att.length ? `
 
 📎 ${att.map((a) => a.name).join(", ")}` : "");
-    let prompt = text.trim() + att.map((a) => `
+    const fence = (s: string) => "`".repeat(Math.max(3, (s.match(/`+/g) ?? []).reduce((mx, m) => Math.max(mx, m.length), 0) + 1)); // clôture plus longue que tout bloc de code contenu dans le fichier
+    let prompt = text.trim() + att.map((a) => { const f = fence(a.content); return `
 
 [Fichier joint : ${a.name}]
-\`\`\`
+${f}
 ${a.content}
-\`\`\``).join(""); const ctxParts: string[] = [];
+${f}`; }).join(""); const ctxParts: string[] = [];
     if (newSession && this.messages(id).some((m) => m.role !== "system")) { const t = this.transcript(id); if (t) { ctxParts.push(`[Contexte repris d'une conversation précédente — cette session est nouvelle]\n${t}`); if (!notice) notice = "Nouvelle session : le contexte récent est transmis explicitement."; this.hist(id, "new_session", "Session fournisseur non reprise : contexte transmis explicitement"); } }
     if (conv.pending_context) { ctxParts.push(`[Contexte transmis depuis une autre conversation]\n${conv.pending_context}`); run(this.db, "UPDATE conversations SET pending_context=NULL WHERE id=?", id); }
     if (ctxParts.length) prompt = `${ctxParts.join("\n\n")}\n\n[Message]\n${prompt}`;
@@ -117,8 +118,8 @@ ${a.content}
   /** Pièces jointes texte : contenu injecté dans le message (aucun accès fichier pour l'IA). Images et binaires non pris en charge. */
   checkAttachments(a: { name: string; content: string }[]) {
     if (a.length > 5) throw new Error("5 pièces jointes maximum."); let total = 0;
-    for (const f of a) { if (typeof f.content !== "string" || f.content.includes(String.fromCharCode(0))) throw new Error(`« ${f.name} » n'est pas un fichier texte.`); total += f.content.length; if (f.content.length > 200_000) throw new Error(`« ${f.name} » dépasse 200 Ko.`); }
-    if (total > 400_000) throw new Error("Pièces jointes trop volumineuses (400 Ko au total)."); return a;
+    for (const f of a) { if (typeof f.content !== "string" || f.content.includes(String.fromCharCode(0))) throw new Error(`« ${f.name} » n'est pas un fichier texte.`); total += f.content.length; if (f.content.length > 400_000) throw new Error(`« ${f.name} » dépasse 400 000 caractères.`); }
+    if (total > 600_000) throw new Error("Pièces jointes trop volumineuses (600 000 caractères au total)."); return a.map((f) => ({ name: f.name, content: f.content }));
   }
   /** « Régénérer » = renvoyer le dernier message utilisateur comme nouveau tour (le fournisseur ne propose pas de régénération native en mode structuré). */
   async regenerate(id: string) { const last = all<any>(this.db, "SELECT content FROM conversation_messages WHERE conversation_id=? AND role='user' ORDER BY created_at DESC, rowid DESC LIMIT 1", id)[0]; if (!last) throw new Error("Aucun message à régénérer"); return this.send(id, last.content); }

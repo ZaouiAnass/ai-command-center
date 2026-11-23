@@ -58,6 +58,12 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     "ext.importSkill": async (modes?: any[]) => { const r = await dialog.showOpenDialog(win!, { properties: ["openFile", "openDirectory"], title: "Choisir un dossier de skill ou un fichier SKILL.md" }); if (r.canceled || !r.filePaths[0]) return null; return c.extensions.importSkill(r.filePaths[0], modes); },
     "ext.testSaved": async (id: string) => { const e = (c.db.prepare("SELECT * FROM extensions WHERE id=? AND kind='mcp'").get(id) as any); if (!e) throw new Error("Serveur introuvable"); return c.extensions.test(JSON.parse(e.config)); },
     "ext.importSkillPath": (p: string, modes?: any[]) => { if (!c.system.skills().some((s: any) => s.path === p)) throw new Error("Skill non détectée dans les dossiers connus."); return c.extensions.importSkill(p, modes); },
+    "doc.status": () => c.converter.status(), "doc.install": () => c.converter.install(),
+    "doc.pick": async () => { const r = await dialog.showOpenDialog(win!, { properties: ["openFile", "multiSelections"], title: "Joindre des documents", filters: [{ name: "Documents, texte et code", extensions: ["pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "epub", "txt", "md", "csv", "tsv", "json", "xml", "yml", "yaml", "log", "sql", "py", "js", "ts", "tsx", "jsx", "java", "c", "cpp", "cs", "go", "rs", "rb", "php", "sh", "ipynb"] }, { name: "Tous les fichiers", extensions: ["*"] }] }); if (r.canceled) return []; r.filePaths.forEach(approve); return r.filePaths; },
+    "doc.images": async (paths: unknown) => { const fs = await import("node:fs"); const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }; const out: any[] = []; for (const p of (Array.isArray(paths) ? paths : []).map(String).filter((q) => approved.has(q)).slice(0, 4)) { const ext = (p.split(".").pop() ?? "").toLowerCase(); if (!MIME[ext]) continue; const st = fs.statSync(p); if (st.size > 5 * 1024 * 1024) throw new Error("Image de plus de 5 Mo : " + p.split(String.fromCharCode(92)).pop()); out.push({ name: p.split(String.fromCharCode(92)).join("/").split("/").pop(), mime: MIME[ext], data: fs.readFileSync(p).toString("base64") }); } return out; },
+    "doc.enableAgents": () => { const s = c.converter.status(); if (!s.mcp) throw new Error("Installez d'abord le convertisseur."); if (!c.extensions.list("mcp").some((e: any) => e.name === "markitdown")) c.extensions.addMcp({ name: "markitdown", config: { transport: "stdio", command: s.mcp, args: [] }, modes: ["work", "code"] });
+      if (!c.extensions.list("skill").some((e: any) => e.name === "lire-documents")) c.extensions.addSkill({ name: "lire-documents", description: "Lire PDF, Word, PowerPoint, Excel, HTML via MarkItDown pour économiser des tokens", body: "Pour lire un document PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx/.xls), HTML ou EPUB, n'ouvre pas le fichier brut : appelle l'outil `convert_to_markdown` du serveur MCP « markitdown » avec l'URI du fichier (ex. file:///C:/dossier/rapport.pdf). Le Markdown obtenu consomme beaucoup moins de tokens. Lis ensuite seulement les parties utiles à la demande.", modes: ["work", "code"] }); return true; },
+    "doc.load": async (paths: unknown) => { const list = (Array.isArray(paths) ? paths : []).map(String).filter((p) => approved.has(p)); if (!list.length) throw new Error("Aucun fichier sélectionné."); return c.converter.load(list); },
     "ext.forConv": (id: string) => c.conversations.extensions(id), "ext.setConv": (id: string, ext: string, on: boolean) => c.conversations.setExtensionActive(id, ext, !!on),
     "terminal.create": async (o: any) => { const p = o.projectId ? c.projects.get(o.projectId) as any : undefined; const cwd = p?.path ?? o.cwd ?? app.getPath("home"); if (p ? false : o.cwd && !c.projects.list().some((x: any) => x.path === o.cwd)) throw new Error("Dossier non autorisé : choisissez un projet."); return c.terminals.create({ kind: ["claude", "codex", "shell"].includes(o.kind) ? o.kind : "shell", cwd, projectId: p?.id, cols: o.cols, rows: o.rows, title: o.title }); },
     "terminal.list": () => c.terminals.list(), "terminal.attach": (id: string) => c.terminals.attach(id), "terminal.write": (id: string, d: string) => c.terminals.write(id, String(d)), "terminal.resize": (id: string, cols: number, rows: number) => c.terminals.resize(id, cols | 0, rows | 0), "terminal.kill": (id: string) => c.terminals.kill(id), "terminal.close": (id: string) => c.terminals.close(id),
@@ -88,6 +94,10 @@ function trackWinState(w: BrowserWindow) {
   w.on("resize", later); w.on("move", later); w.on("maximize", later); w.on("unmaximize", later); w.on("close", save);
 }
 
+/** Chemins que l'utilisateur a réellement choisis (sélecteur de fichiers ou glisser-déposer authentique) : le renderer ne peut pas faire lire un chemin arbitraire. */
+const approved = new Set<string>(); const approve = (p: string) => { if (approved.size > 500) approved.clear(); approved.add(p); };
+ipcMain.on("acc:approve", (_e, p: unknown) => { if (typeof p === "string" && p.length < 1024) approve(p); });
+
 async function createWindow() {
   const b = initialBounds(); const wa = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({ ...b, minWidth: Math.min(900, wa.width), minHeight: Math.min(600, wa.height), show: false, backgroundColor: "#0b0d12", title: "AI Command Center", autoHideMenuBar: true, icon: join(__dirname, "../../build/icon.png"),
@@ -98,6 +108,7 @@ async function createWindow() {
   if (isDev) await win.loadURL("http://localhost:5173"); else await win.loadFile(join(__dirname, "../renderer/index.html"));
 }
 
+if (process.platform === "win32") app.setAppUserModelId("local.ai-command-center"); // même identifiant que le raccourci de l'installateur : épinglage et regroupement corrects dans la barre des tâches
 app.whenReady().then(async () => {
   core = createCore({ dataDir: app.getPath("userData"), onTerminalEvent: (e) => { if (win && !win.isDestroyed()) win.webContents.send("acc:term", e); } });
   const table = handlers(core);

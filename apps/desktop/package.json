@@ -77,8 +77,8 @@
           ]
         }
       ],
-      "signAndEditExecutable": false,
-      "icon": "build/icon.png"
+      "signAndEditExecutable": true,
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
