@@ -27,6 +27,28 @@ function ExtChip({ mode, convId, disabled }: { mode: Mode; convId?: string; disa
     {open && <div role="dialog" aria-label="Extensions" className={`anim-pop absolute left-0 w-[340px] max-w-[88vw] bg-panel border border-line-strong rounded-2xl p-4 z-40 overflow-auto ${side.up ? "bottom-full mb-2" : "top-full mt-2"}`} style={{ boxShadow: "var(--shadow-pop)", maxHeight: side.max }}><ExtToggles convId={convId} mode={mode} bare /></div>}</div>;
 }
 
+/** Quota d'abonnement du fournisseur choisi : barre compacte (fenêtre la plus contraignante) + détail au clic. Valeurs officielles uniquement, jamais extrapolées. */
+const qTone = (p: number | null | undefined) => p == null ? "var(--text-muted)" : p >= 90 ? "var(--danger)" : p >= 70 ? "var(--warning)" : "var(--accent)";
+const fmtReset = (iso?: string) => { if (!iso) return ""; const d = new Date(iso), ms = d.getTime() - Date.now(); if (isNaN(ms)) return ""; if (ms <= 0) return "bientôt"; const m = Math.round(ms / 60000); const rel = m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${Math.floor(m / 1440)} j ${Math.floor((m % 1440) / 60)} h`; return `dans ${rel}`; };
+function QuotaMeter({ provider }: { provider: "claude" | "codex" }) {
+  const [open, setOpen] = useState(false); const ref = useRef<HTMLDivElement>(null);
+  const { data: q } = useData<any>("providers.quota", [provider], { events: /quota|execution\.(completed|failed)/, every: 60000 });
+  useEffect(() => { if (!open) return; const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); }; const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }; document.addEventListener("mousedown", down); document.addEventListener("keydown", key, true); return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key, true); }; }, [open]);
+  const wins: any[] = (q?.windows ?? []).filter((w: any) => w); if (!wins.length) return null;
+  const stale = (w: any) => !!w.resetsAt && new Date(w.resetsAt).getTime() <= Date.now(); // fenêtre réinitialisée depuis la dernière mesure : le % n'est plus valable
+  const fresh = wins.filter((w) => !stale(w)); const top = [...(fresh.length ? fresh : wins)].sort((a, b) => (b.usedPercent ?? -1) - (a.usedPercent ?? -1))[0];
+  const pct = fresh.length && top.usedPercent != null ? Math.max(0, Math.min(100, Math.round(top.usedPercent))) : null;
+  return <div ref={ref} className="relative shrink-0">
+    <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)} title={pct == null ? `${PROVIDER_LABEL[provider]} : mesure périmée (fenêtre réinitialisée), nouvelle mesure à la prochaine exécution` : `${PROVIDER_LABEL[provider]} — ${top.label} : ${pct} % utilisé`} className="flex items-center gap-2 h-9 px-2.5 rounded-xl text-xs text-muted hover:text-fg hover:bg-raised transition-colors">
+      <span className="hidden 2xl:inline">{top.label}</span><span className="w-14 h-1.5 rounded-full bg-[var(--surface-hover)] overflow-hidden" aria-hidden><span className="block h-full rounded-full transition-[width] duration-500" style={{ width: `${pct ?? 0}%`, background: qTone(pct) }} /></span><span className="tnum w-8 text-right" style={{ color: pct != null && pct >= 70 ? qTone(pct) : undefined }}>{pct == null ? "—" : `${pct} %`}</span></button>
+    {open && <div role="dialog" aria-label={`Quota ${PROVIDER_LABEL[provider]}`} className="anim-pop absolute right-0 bottom-full mb-2 w-[320px] max-w-[88vw] bg-panel border border-line-strong rounded-2xl p-4 z-40" style={{ boxShadow: "var(--shadow-pop)" }}>
+      <div className="flex items-center justify-between mb-3"><span className="text-[13px] font-semibold">Quota {PROVIDER_LABEL[provider]}</span><Link to="/quotas" className="text-2xs text-accent hover:underline">Détails</Link></div>
+      <div className="space-y-3.5">{wins.map((w) => { const old = stale(w); const p = old || w.usedPercent == null ? null : Math.max(0, Math.min(100, Math.round(w.usedPercent))); return <div key={w.label}><div className="flex justify-between text-[13px] mb-1.5"><span>{w.label}</span><span className="tnum text-fg2">{p == null ? "—" : `${p} %`}</span></div>
+        <div className="h-2 rounded-full bg-[var(--surface-hover)] overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p ?? undefined} aria-label={w.label}><div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${p ?? 0}%`, background: qTone(p) }} /></div>
+        {old ? <div className="text-2xs text-muted mt-1">Fenêtre réinitialisée depuis la dernière mesure. Nouvelle mesure à la prochaine exécution.</div> : w.resetsAt ? <div className="text-2xs text-muted mt-1">Réinitialisation {fmtReset(w.resetsAt)} · {new Date(w.resetsAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</div> : null}</div>; })}</div>
+      <p className="text-2xs text-muted mt-3.5">Mesures officielles du fournisseur, jamais estimées par l'application.</p></div>}</div>;
+}
+
 /** Pastille de configuration : un seul bouton lisible qui ouvre le panneau fournisseur / modèle / effort / permissions. */
 function ModelPill({ mode, cfg, onChange, disabled, convId }: { mode: Mode; cfg: AIConfig; onChange: (c: AIConfig) => void; disabled?: boolean; convId?: string }) {
   const [open, setOpen] = useState(false); const [side, setSide] = useState<{ up: boolean; max: number }>({ up: true, max: 480 }); const ref = useRef<HTMLDivElement>(null); const { data: cat } = useData<any>("ai.catalog", [cfg.provider]);
@@ -65,7 +87,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, sending, place
       <ModelPill mode={mode} cfg={cfg} onChange={onCfg} disabled={busy} convId={convId} />
       <ExtChip mode={mode} convId={convId} disabled={busy} />
       {note && <span className="text-2xs text-accent ml-1 hidden md:inline" role="status">{note}</span>}
-      <div className="ml-auto flex items-center gap-2 shrink-0"><span className="hidden lg:inline text-2xs text-muted"><span className="kbd">Entrée</span> pour envoyer</span>
+      <div className="ml-auto flex items-center gap-1 shrink-0"><QuotaMeter provider={cfg.provider} /><span className="hidden 2xl:inline text-2xs text-muted mr-1"><span className="kbd">Entrée</span> pour envoyer</span>
         {busy ? <button type="button" className="h-9 w-9 rounded-full grid place-items-center bg-[var(--danger-subtle)] text-danger hover:bg-[rgba(251,113,133,.25)] transition-colors" aria-label="Arrêter la génération" title="Arrêter" onClick={onStop}><Square size={13} fill="currentColor" /></button>
           : <button type="button" className={`h-9 w-9 rounded-full grid place-items-center transition-all ${can ? "bg-[var(--btn-primary)] text-white hover:bg-[var(--btn-primary-hover)] hover:scale-105 active:scale-95" : "bg-raised text-muted cursor-not-allowed"}`} aria-label="Envoyer" title="Envoyer (Entrée)" disabled={!can} onClick={onSend}><ArrowUp size={18} strokeWidth={2.4} /></button>}</div></div></div>;
 }
