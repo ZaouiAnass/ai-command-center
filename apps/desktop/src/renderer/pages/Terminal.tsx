@@ -3,16 +3,21 @@ import { useSearchParams } from "react-router-dom";
 import { Terminal as XTerm } from "@xterm/xterm"; import { FitAddon } from "@xterm/addon-fit"; import { SearchAddon } from "@xterm/addon-search"; import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { Plus, X, Search, Copy, ClipboardPaste, Square, SquareTerminal, RotateCcw, ChevronUp, ChevronDown, Info, Maximize2, Minimize2, Minus } from "lucide-react";
-import { api } from "../api"; import { useData } from "../hooks"; import { useT } from "../i18n"; import { toast, confirmDialog } from "../overlay";
+import { api } from "../api"; import { useData } from "../hooks"; import { useT } from "../i18n"; import { toast, confirmDialog } from "../overlay"; import { currentTheme } from "../theme";
 import { Page, Card, Modal, Field, EmptyState, Badge, ErrorState } from "../ui";
 
-const THEME = { background: "#1f1e1d", foreground: "#faf9f5", cursor: "#e0865f", cursorAccent: "#09090b", selectionBackground: "#e0865f40", selectionInactiveBackground: "#e0865f22",
+const DARK = { background: "#1f1e1d", foreground: "#faf9f5", cursor: "#e0865f", cursorAccent: "#09090b", selectionBackground: "#e0865f40", selectionInactiveBackground: "#e0865f22",
   black: "#18181d", red: "#fb7185", green: "#34d399", yellow: "#fbbf24", blue: "#60a5fa", magenta: "#c4a8ff", cyan: "#67c1f5", white: "#d4d4d8",
   brightBlack: "#52525b", brightRed: "#fda4af", brightGreen: "#6ee7b7", brightYellow: "#fcd34d", brightBlue: "#93c5fd", brightMagenta: "#ddd0ff", brightCyan: "#a5dcfa", brightWhite: "#f5f5f7" };
+const LIGHT = { background: "#fbfaf6", foreground: "#1f1e1d", cursor: "#b4532f", cursorAccent: "#ffffff", selectionBackground: "#b4532f33", selectionInactiveBackground: "#b4532f1a",
+  black: "#1f1e1d", red: "#be123c", green: "#047857", yellow: "#a35a06", blue: "#1d4ed8", magenta: "#7e22ce", cyan: "#0e7490", white: "#6b6a65",
+  brightBlack: "#57554f", brightRed: "#e11d48", brightGreen: "#059669", brightYellow: "#b45309", brightBlue: "#2563eb", brightMagenta: "#9333ea", brightCyan: "#0891b2", brightWhite: "#1f1e1d" };
+const THEME = () => (currentTheme() === "light" ? LIGHT : DARK);
 
 interface Inst { term: XTerm; fit: FitAddon; search: SearchAddon; el: HTMLDivElement; ready: boolean; queue: { data: string; end: number }[]; offset: number; kind: string; exited?: number | null }
 /** Les instances xterm vivent hors de React : changer de page ou d'onglet ne perd ni l'écran ni le scrollback. */
 const insts = new Map<string, Inst>(); let listening = false;
+window.addEventListener("acc-theme", () => insts.forEach((i) => { i.term.options.theme = THEME(); })); // les terminaux ouverts suivent le thème
 function listen() {
   if (listening) return; listening = true;
   window.acc.onTerminal((e) => {
@@ -28,7 +33,7 @@ function writeSlice(i: Inst, data: string, end: number) { const start = end - da
 async function ensureInst(id: string, kind: string): Promise<Inst> {
   listen(); const ex = insts.get(id); if (ex) return ex;
   const el = document.createElement("div"); el.style.cssText = "width:100%;height:100%";
-  const term = new XTerm({ fontFamily: '"JetBrains Mono Variable", "Cascadia Code", Consolas, monospace', fontSize: 13, lineHeight: 1.25, cursorBlink: true, scrollback: 10000, theme: THEME, allowProposedApi: true, convertEol: false, macOptionIsMeta: true, windowsPty: navigator.platform.includes("Win") ? { backend: "conpty" } : undefined });
+  const term = new XTerm({ fontFamily: '"JetBrains Mono Variable", "Cascadia Code", Consolas, monospace', fontSize: 13, lineHeight: 1.25, cursorBlink: true, scrollback: 10000, theme: THEME(), allowProposedApi: true, convertEol: false, macOptionIsMeta: true, windowsPty: navigator.platform.includes("Win") ? { backend: "conpty" } : undefined });
   const fit = new FitAddon(); const search = new SearchAddon(); term.loadAddon(fit); term.loadAddon(search); term.loadAddon(new WebLinksAddon((_, uri) => window.open(uri, "_blank")));
   term.open(el);
   const inst: Inst = { term, fit, search, el, ready: false, queue: [], offset: 0, kind };
@@ -97,7 +102,7 @@ function Pane(p: PaneProps) {
     <header className="flex items-center gap-1.5 h-10 pl-3 pr-1.5 border-b border-line shrink-0 min-w-0 bg-panel/60">
       {p.count > 1 && <span className="tnum text-2xs w-4 h-4 rounded grid place-items-center bg-raised text-muted shrink-0" title={`Alt+${p.slot + 1} pour y aller`}>{p.slot + 1}</span>}
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${live ? "bg-success pulse-dot" : "bg-muted"}`} aria-hidden /><span className="sr-only">{live ? "en cours" : "terminé"}</span>
-      <select aria-label="Terminal affiché dans ce panneau" value={info.id} onChange={(e) => p.onSwitch(e.target.value)} className="min-w-0 flex-1 h-8 bg-transparent text-[13px] font-medium truncate cursor-pointer outline-none hover:text-accent focus-visible:text-accent transition-colors" style={{ colorScheme: "dark" }}>
+      <select aria-label="Terminal affiché dans ce panneau" value={info.id} onChange={(e) => p.onSwitch(e.target.value)} className="min-w-0 flex-1 h-8 bg-transparent text-[13px] font-medium truncate cursor-pointer outline-none hover:text-accent focus-visible:text-accent transition-colors" >
         {p.all.map((x) => <option key={x.id} value={x.id}>{x.title}{p.shownIds.includes(x.id) && x.id !== info.id ? "  (affiché ailleurs)" : ""}</option>)}</select>
       {p.projectName && <span className="hidden xl:inline text-2xs text-muted max-w-[110px] truncate shrink-0" title={info.cwd}>{p.projectName}</span>}
       <button className={ic} aria-label="Rechercher dans ce terminal" title="Rechercher (Ctrl+F)" onClick={p.onSearch}><Search size={13} /></button>

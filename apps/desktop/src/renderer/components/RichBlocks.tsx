@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Copy, CheckCircle2, XCircle, RotateCcw, MessageSquareText, Maximize2, Download, Code2, Eye, Loader2, ListChecks, BarChart3, GitBranch, ChevronLeft, ChevronRight, Send } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
-import { api } from "../api"; import { toast } from "../overlay"; import { Modal } from "../ui";
+import { currentTheme } from "../theme"; import { api } from "../api"; import { toast } from "../overlay"; import { Modal } from "../ui";
 
 /** Actions de la conversation disponibles pour les blocs interactifs (envoyer une réponse cliquée au modèle). Absent hors conversation : les blocs deviennent en lecture seule. */
 export const ChatActions = createContext<{ send?: (text: string) => void; busy?: boolean }>({});
@@ -56,7 +56,7 @@ function QuizBlock({ raw }: { raw: string }) {
     <div role={q!.multi ? "group" : "radiogroup"} aria-label="Réponses" className="grid gap-2">{q!.options.map((o, i) => { const sel = (picked ?? draft).includes(i); const good = revealed && q!.answer!.includes(i); const bad = revealed && sel && !good;
       return <button key={i} role={q!.multi ? "checkbox" : "radio"} aria-checked={sel} disabled={!!picked} onClick={() => { if (picked) return; if (q!.multi) setDraft(draft.includes(i) ? draft.filter((x) => x !== i) : [...draft, i]); else answer([i]); }}
         className={`group flex items-center gap-3 text-left px-3.5 py-2.5 rounded-xl border text-[13.5px] transition-all ${good ? "border-success bg-[var(--success-subtle)]" : bad ? "border-danger bg-[var(--danger-subtle)]" : sel ? "border-accent bg-accent-subtle" : "border-line hover:border-line-strong hover:bg-raised active:scale-[.995]"} ${picked ? "cursor-default" : "cursor-pointer"}`}>
-        <span className={`w-6 h-6 rounded-md grid place-items-center text-2xs font-semibold shrink-0 ${good ? "bg-success text-[#06251a]" : bad ? "bg-danger text-[#2b0a10]" : "bg-[var(--surface-hover)] text-fg2 group-hover:text-fg"}`}>{good ? <Check size={13} /> : bad ? <XCircle size={13} /> : LETTERS[i]}</span><span className="min-w-0 flex-1">{o}</span></button>; })}</div>
+        <span className={`w-6 h-6 rounded-md grid place-items-center text-2xs font-semibold shrink-0 ${good ? "bg-success text-[var(--on-success)]" : bad ? "bg-danger text-[var(--on-danger)]" : "bg-[var(--surface-hover)] text-fg2 group-hover:text-fg"}`}>{good ? <Check size={13} /> : bad ? <XCircle size={13} /> : LETTERS[i]}</span><span className="min-w-0 flex-1">{o}</span></button>; })}</div>
     {q!.multi && !picked && <button className="btn btn-primary mt-3" disabled={!draft.length} onClick={() => answer(draft)}>Valider</button>}
     {revealed && <div className={`mt-3 text-[13px] rounded-xl px-3.5 py-2.5 anim-fade ${ok(step) ? "bg-[var(--success-subtle)] text-success" : "bg-[var(--danger-subtle)] text-danger"}`}><b>{ok(step) ? "Bonne réponse." : `Bonne réponse : ${q!.answer!.map((k) => LETTERS[k]).join(", ")}.`}</b>{q!.explain && <span className="text-fg2"> {q!.explain}</span>}</div>}
     <div className="flex items-center justify-between mt-4"><button className="btn btn-ghost btn-sm" disabled={step === 0} onClick={() => go(step - 1)}><ChevronLeft size={14} />Précédent</button><button className="btn btn-sm" disabled={!picked} onClick={() => go(step + 1)}>{step === n - 1 ? "Voir le résultat" : "Suivant"}<ChevronRight size={14} /></button></div></div></Shell>;
@@ -97,16 +97,22 @@ function ChartBlock({ raw }: { raw: string }) {
 
 // ---------------------------------------------------------------- Diagrammes Mermaid (chargés à la demande)
 let mermaidP: Promise<any> | undefined;
+const MERMAID_VARS = {
+  dark: { background: "#2d2c2a", primaryColor: "#3d3c39", primaryTextColor: "#faf9f5", primaryBorderColor: "#e0865f", lineColor: "#9d9b92", secondaryColor: "#343330", tertiaryColor: "#262624", textColor: "#faf9f5", noteBkgColor: "#343330", noteTextColor: "#faf9f5" },
+  light: { background: "#ffffff", primaryColor: "#f3f1ea", primaryTextColor: "#1f1e1d", primaryBorderColor: "#b4532f", lineColor: "#66645d", secondaryColor: "#e9e6db", tertiaryColor: "#faf9f5", textColor: "#1f1e1d", noteBkgColor: "#f3f1ea", noteTextColor: "#1f1e1d" },
+} as const;
 function MermaidBlock({ code }: { code: string }) {
   const sc = useContext(RichScope); if (sc.streaming) return <Pending what="du diagramme" />;
   return <MermaidView code={code} />;
 }
 function MermaidView({ code }: { code: string }) {
-  const [svg, setSvg] = useState<string>(); const [err, setErr] = useState<string>(); const [src, setSrc] = useState(false); const id = useRef("m" + Math.random().toString(36).slice(2, 9));
+  const [svg, setSvg] = useState<string>(); const [err, setErr] = useState<string>(); const [src, setSrc] = useState(false); const id = useRef("m" + Math.random().toString(36).slice(2, 9)); const [th, setTh] = useState(currentTheme());
+  useEffect(() => { const f = () => setTh(currentTheme()); window.addEventListener("acc-theme", f); return () => window.removeEventListener("acc-theme", f); }, []);
   useEffect(() => { let off = false; setErr(undefined);
-    (mermaidP ??= import("mermaid").then((m) => { m.default.initialize({ startOnLoad: false, suppressErrorRendering: true, securityLevel: "strict", theme: "base", fontFamily: "Inter Variable, Segoe UI, sans-serif", themeVariables: { background: "#2d2c2a", primaryColor: "#3d3c39", primaryTextColor: "#faf9f5", primaryBorderColor: "#e0865f", lineColor: "#9d9b92", secondaryColor: "#343330", tertiaryColor: "#262624", textColor: "#faf9f5", noteBkgColor: "#343330", noteTextColor: "#faf9f5" } }); return m.default; }))
-      .then((m) => m.render(id.current, code)).then((r: any) => { if (!off) setSvg(r.svg); }).catch((e: any) => { if (!off) setErr(String(e?.message ?? e).split("\n")[0]!.slice(0, 160)); });
-    return () => { off = true; }; }, [code]);
+    (mermaidP ??= import("mermaid").then((m) => m.default))
+      .then((m) => { m.initialize({ startOnLoad: false, suppressErrorRendering: true, securityLevel: "strict", theme: "base", fontFamily: "Inter Variable, Segoe UI, sans-serif", themeVariables: MERMAID_VARS[th] }); return m.render(id.current + th, code); })
+      .then((r: any) => { if (!off) setSvg(r.svg); }).catch((e: any) => { document.getElementById("d" + id.current + th)?.remove(); document.getElementById(id.current + th)?.remove(); if (!off) setErr(String(e?.message ?? e).split("\n")[0]!.slice(0, 160)); });
+    return () => { off = true; }; }, [code, th]);
   return <Shell icon={GitBranch} title="Diagramme" right={<button className="btn btn-ghost btn-sm" onClick={() => setSrc(!src)}>{src ? <Eye size={13} /> : <Code2 size={13} />}{src ? "Diagramme" : "Code"}</button>}>
     {src || err ? <div className="p-3">{err && <div role="alert" className="text-xs text-warning mb-1.5">Diagramme invalide : {err}</div>}<pre className="bg-bg border border-line rounded-xl p-4 overflow-auto text-[12.5px]">{code}</pre></div>
       : svg ? <div className="p-4 overflow-auto flex justify-center [&_svg]:max-w-full [&_svg]:h-auto" dangerouslySetInnerHTML={{ __html: svg }} /> : <div className="p-6 grid place-items-center text-muted text-[13px]"><Loader2 size={16} className="animate-spin" /></div>}</Shell>;

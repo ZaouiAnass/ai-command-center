@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown"; import remarkGfm from "remark-gfm"; import remarkMath from "remark-math"; import rehypeKatex from "rehype-katex"; import rehypeHighlight from "rehype-highlight";
-import "katex/dist/katex.min.css"; import "highlight.js/styles/github-dark.css"; import { richBlock, RICH_LANGS } from "../components/RichBlocks";
+import "katex/dist/katex.min.css"; import { richBlock, RICH_LANGS } from "../components/RichBlocks";
 import { Plus, Search, Send, Square, ChevronRight, Terminal, FilePen, FileSearch, Globe, Wrench, Copy, Check, PanelRight, ShieldAlert, Loader2, CheckCircle2, XCircle, MessageSquare, Cpu } from "lucide-react";
 import { api, fmt, usd, dur, ago } from "../api"; import { useData } from "../hooks"; import { useT } from "../i18n"; import { toast } from "../overlay";
 import { Page, Card, Modal, Field, EmptyState, ErrorState, LoadingSkeleton, Badge, StatusIndicator, Disclaimer } from "../ui";

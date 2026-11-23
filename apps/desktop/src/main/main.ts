@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol, Tray, Menu, nativeImage, globalShortcut, desktopCapturer } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, nativeTheme } from "electron";
 import { randomUUID } from "node:crypto";
 // Aperçus HTML/SVG générés par le modèle : servis par un schéma dédié, avec une politique de sécurité qui autorise les scripts de la page mais aucun accès réseau ; affichés dans un iframe sandbox (origine opaque).
 protocol.registerSchemesAsPrivileged([{ scheme: "acc-artifact", privileges: { standard: true, secure: true } }]);
@@ -75,6 +75,8 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
       } finally { if (wasVisible) { w.show(); w.focus(); } }
     },
     // ---- Lanceur global, icône de notification, arrière-plan ----
+    "app.setTheme": (mode: unknown) => { const m = mode === "light" || mode === "dark" ? mode : "system"; c.settings.set("ui.theme", m); nativeTheme.themeSource = m; for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#262624" : "#faf9f5"); return m; },
+    "app.setZoom": (f: unknown) => { const z = Math.min(1.4, Math.max(0.8, Number(f) || 1)); c.settings.set("ui.zoom", z); win?.webContents.setZoomFactor(z); return z; },
     "launcher.info": () => ({ packaged: app.isPackaged, shortcut: currentShortcut, shortcutOk, defaultShortcut: DEFAULT_SHORTCUT, keepRunning: !!c.settings.get("app.keepRunning", false), autostart: !!c.settings.get("app.autostart", false) }),
     "app.setShortcut": (accel: unknown) => { const a = String(accel ?? "").trim(); const r = registerShortcut(a); if (r.ok) c.settings.set("app.shortcut", a); return { ...r, shortcut: currentShortcut }; },
     "app.setKeepRunning": (v: unknown) => { c.settings.set("app.keepRunning", !!v); return true; },
@@ -165,10 +167,11 @@ function createTray() {
 
 async function createWindow() {
   const b = initialBounds(); const wa = screen.getPrimaryDisplay().workArea;
-  win = new BrowserWindow({ ...b, minWidth: Math.min(900, wa.width), minHeight: Math.min(600, wa.height), show: false, backgroundColor: "#0b0d12", title: "AI Command Center", autoHideMenuBar: true, icon: join(__dirname, "../../build/icon.png"),
+  win = new BrowserWindow({ ...b, minWidth: Math.min(900, wa.width), minHeight: Math.min(600, wa.height), show: false, backgroundColor: nativeTheme.shouldUseDarkColors ? "#262624" : "#faf9f5", title: "AI Command Center", autoHideMenuBar: true, icon: join(__dirname, "../../build/icon.png"),
     webPreferences: { preload: join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
   if (b.maximized) win.maximize(); win.once("ready-to-show", () => { if (!(startHidden && core?.settings.get("app.keepRunning", false))) win?.show(); }); trackWinState(win);
   // Fermer la fenêtre : mise en arrière-plan (icône près de l'horloge) si activé, sinon l'application se ferme. « Quitter » du menu de l'icône quitte vraiment.
+  win.webContents.on("did-finish-load", () => { const z = Number(core?.settings.get("ui.zoom", 1)); if (z && z !== 1) win?.webContents.setZoomFactor(z); });
   win.on("close", (e) => { if (!quitting && core?.settings.get("app.keepRunning", false)) { e.preventDefault(); win?.hide(); } });
   win.on("closed", () => { win = null; if (!quitting) quitApp(); });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: "deny" }; });
@@ -193,6 +196,7 @@ app.whenReady().then(async () => {
     win?.webContents.send("acc:event", ev);
     if (ev.type === "notification" && Notification.isSupported() && core.settings.get("notifications.desktop", true)) new Notification({ title: String(ev.payload.title), body: String(ev.payload.body ?? "") }).show();
   });
+  nativeTheme.themeSource = (["light", "dark"].includes(String(core.settings.get("ui.theme", "system"))) ? String(core.settings.get("ui.theme", "system")) : "system") as "light" | "dark" | "system";
   await createWindow(); createTray(); registerShortcut(String(core.settings.get("app.shortcut", DEFAULT_SHORTCUT)));
   if (app.isPackaged) { try { app.setLoginItemSettings({ openAtLogin: !!core.settings.get("app.autostart", false), args: ["--hidden"] }); } catch { /* non bloquant */ } }
   core.allProviders(true).catch(() => {});
