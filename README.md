@@ -1,8 +1,117 @@
 # AI Command Center
 
-Application desktop locale (Electron + React + TypeScript + SQLite) pour piloter **Claude Code** et **OpenAI Codex** depuis une seule interface, avec vos **abonnements existants** — aucune clé API.
+Application desktop locale (Windows) pour piloter **Claude Code** et **OpenAI Codex** depuis une seule interface, avec **vos abonnements existants** (Claude Pro/Max, ChatGPT Plus/Pro…) : **aucune clé API, aucune facturation à l'usage**. Trois modes : **Chat** (conversation), **Work** (travaux avec documents et livrables) et **Code** (programmation sur un projet local, seul ou avec plusieurs agents).
 
-## Démarrage
+> L'application ne remplace pas les CLI : elle lance les programmes officiels `claude` et `codex` installés sur votre ordinateur. Chat et Work sont des modes locaux qui utilisent ces moteurs ; ce ne sont pas les produits Chat/Work natifs de claude.ai ou ChatGPT.
+
+## Sommaire
+
+1. [Ce qu'il faut avant de commencer](#1-ce-quil-faut-avant-de-commencer)
+2. [Installer l'application](#2-installer-lapplication)
+3. [Installer et connecter les modèles](#3-installer-et-connecter-les-modèles)
+4. [Premier lancement](#4-premier-lancement)
+5. [Ajouter des serveurs MCP et des skills](#5-ajouter-des-serveurs-mcp-et-des-skills)
+6. [Dépannage](#6-dépannage)
+7. [Développement](#7-développement)
+
+## 1. Ce qu'il faut avant de commencer
+
+| Besoin | Détail |
+|---|---|
+| Système | **Windows 10/11 (x64)**. macOS et Linux ne sont ni construits ni testés. |
+| Abonnement | Au moins un des deux : un abonnement **Claude** (Pro/Max) et/ou un abonnement **ChatGPT** (Plus/Pro) donnant accès à Codex. |
+| Claude Code | Le CLI officiel `claude` (voir § 3). |
+| Codex | Le CLI officiel `codex` (voir § 3). |
+| Git | Recommandé pour le mode Code (suivi des changements, worktrees). |
+| Node.js ≥ 22 | **Seulement** pour installer depuis le code source (§ 2, option B) ou développer. |
+
+Vous pouvez n'utiliser qu'un seul des deux fournisseurs : l'autre apparaîtra simplement comme « absent » ou « à vérifier ».
+
+## 2. Installer l'application
+
+### Option A : l'installateur (le plus simple)
+
+1. Récupérez `AI Command Center Setup 0.1.0.exe` (page *Releases* du dépôt si une version y est publiée, sinon construisez-le avec l'option B).
+2. Double-cliquez. L'installation se fait **pour votre compte seulement** (aucun droit administrateur) et crée un raccourci sur le Bureau.
+3. L'installateur **n'est pas signé** : Windows SmartScreen peut afficher « Windows a protégé votre PC ». Cliquez sur **Informations complémentaires**, puis **Exécuter quand même**. Ce n'est pas une faille : un certificat de signature de code est payant et n'a pas encore été acheté.
+4. Désinstallation : *Paramètres Windows › Applications*.
+
+### Option B : depuis le code source
+
+```bash
+git clone https://github.com/hamza-bouda/ai-command-center.git
+cd ai-command-center
+npm install
+npm run start -w @acc/desktop      # construit et lance l'application
+```
+
+Pour fabriquer vous-même l'installateur :
+
+```bash
+npm run dist -w @acc/desktop       # résultat : apps/desktop/release/AI Command Center Setup 0.1.0.exe
+```
+
+## 3. Installer et connecter les modèles
+
+L'application détecte les programmes `claude` et `codex` (dans le `PATH`, puis dans `~/.local/bin` pour Claude et `%LOCALAPPDATA%\OpenAI\Codex\bin` pour Codex). **Vous vous connectez directement dans le CLI officiel** : l'application ne vous demande jamais de mot de passe et ne lit jamais vos jetons.
+
+### Claude Code
+
+1. Installez le CLI officiel en suivant la documentation d'Anthropic : <https://docs.claude.com/en/docs/claude-code/overview> (par exemple `npm install -g @anthropic-ai/claude-code`).
+2. Connectez-vous avec votre **abonnement Claude** :
+   ```bash
+   claude auth login          # ouvre le navigateur ; choisissez votre compte Claude (abonnement)
+   claude auth status         # doit indiquer que vous êtes connecté
+   ```
+   Évitez `claude auth login --console` : il utilise la facturation API (l'application bloquera ce mode, voir plus bas).
+
+### Codex (OpenAI)
+
+1. Installez le CLI officiel d'OpenAI : <https://github.com/openai/codex> (suivez les instructions d'installation du dépôt, ou installez l'application Codex qui fournit le programme).
+2. Connectez-vous avec votre **compte ChatGPT** :
+   ```bash
+   codex login                # ouvre le navigateur ; connectez-vous avec ChatGPT
+   codex login status         # doit afficher « Logged in using ChatGPT »
+   ```
+
+### Vérifier dans l'application
+
+Ouvrez **Suivi › Abonnements et quotas** : chaque fournisseur affiche sa version, son mode d'authentification (*Abonnement*), son plan et ses fenêtres de quota (5 h / 7 jours) réelles. Le bouton **Revérifier** relance la détection ; **Diagnostics** explique ce qui manque. La pastille en bas de la barre latérale (« Claude ● Codex ● ») est verte quand les deux sont connectés par abonnement.
+
+Versions avec lesquelles l'application a été testée : Claude Code 2.1.x, Codex 0.167.x. Des versions plus récentes devraient fonctionner, mais une évolution des CLI peut casser un détail : dans ce cas, ouvrez une *issue*.
+
+### Mode « abonnement exclusif » (activé par défaut)
+
+Pour que rien ne soit facturé à l'usage, l'application **bloque toute exécution dont l'authentification n'est pas vérifiée comme « abonnement »** et retire de l'environnement les variables de clé API (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`…). Si une exécution est refusée avec ce message, reconnectez-vous par abonnement (commandes ci-dessus). Le réglage se trouve dans **Paramètres › Facturation**.
+
+## 4. Premier lancement
+
+1. **Accueil** : choisissez **Chat**, **Work** ou **Code**.
+2. **Chat** : écrivez directement. Sous la zone de texte, la pastille « Claude Code · Modèle par défaut » ouvre le choix du **fournisseur, du modèle et du niveau d'effort** (les modèles et efforts proposés sont ceux que le CLI déclare réellement).
+3. **Code** : ajoutez d'abord un projet (dossier local) dans *Outils Code › Projets*, puis ouvrez une session. « Multi-Agent Workspace » permet de lancer plusieurs agents en parallèle.
+4. **Work** : créez un travail, ajoutez des documents sources, suivez le plan et les livrables.
+5. **Suivi › Consommation** : tokens et **équivalent estimé au tarif API** (jamais un montant facturé en plus de votre abonnement).
+6. **Paramètres › Sauvegarde** : sauvegarde et restauration de vos données (stockées uniquement sur votre ordinateur). **Paramètres › Application** : langue (français/anglais) et prénom pour la salutation.
+
+Raccourcis : `Ctrl+1` Chat · `Ctrl+2` Work · `Ctrl+3` Code · `Ctrl+N` nouveau · `Ctrl+K` recherche.
+
+## 5. Ajouter des serveurs MCP et des skills
+
+Page **MCP et Skills › Mes extensions** : ajoutez un serveur MCP (local par commande, ou distant par URL) ou une skill (instructions réutilisables, ou import d'un dossier `SKILL.md`), testez la connexion, puis choisissez où l'utiliser (**Chat, Work, Code**). Dans une conversation, la pastille **Extensions** permet de les couper une par une. Un serveur MCP local exécute un programme sur votre ordinateur : n'ajoutez que des serveurs de confiance. Détails plus bas (§ « Extensions »).
+
+## 6. Dépannage
+
+| Symptôme | Cause probable et solution |
+|---|---|
+| Un fournisseur est « absent » | Le programme n'est pas trouvé. Vérifiez `claude --version` / `codex --version` dans un terminal, ajoutez le dossier au `PATH`, puis **Revérifier**. |
+| « à vérifier » / exécution bloquée | Pas connecté par abonnement. Relancez `claude auth login` ou `codex login` puis **Revérifier**. |
+| Message sur une clé API | Une variable d'environnement de clé API est définie. L'application l'ignore (mode exclusif), mais le CLI peut l'utiliser seul : supprimez-la de vos variables Windows. |
+| « Limite atteinte » | Quota de votre abonnement épuisé (fenêtre 5 h ou 7 jours). L'application ne contourne pas les quotas : attendez la réinitialisation affichée dans **Quotas**, ou basculez sur l'autre fournisseur depuis la bannière. |
+| Premier démarrage de Codex en erreur | Un verrou de base de données au premier lancement : réessayez, l'application refait une tentative automatique. |
+| Windows bloque l'installateur | Voir § 2 (installateur non signé). |
+| Interface lente sur « MCP des CLI » | Le relevé de l'état des serveurs peut prendre quelques secondes ; l'application reste utilisable pendant ce temps. |
+
+## 7. Développement
 
 ```bash
 npm install
@@ -14,7 +123,6 @@ npm run typecheck                 # tsc (core + desktop)
 ```
 
 Prérequis : Node ≥ 22 (utilise `node:sqlite`), Git, `claude` et `codex` installés et connectés.
-Les exécutables sont détectés dans le PATH, puis `~/.local/bin` (Claude) et `%LOCALAPPDATA%\OpenAI\Codex\bin` (Codex).
 
 ## Règles d'abonnement (appliquées dans le code)
 
@@ -64,7 +172,7 @@ apps/desktop/src    main (IPC liste blanche), preload (contextBridge), renderer 
 ```
 Sécurité Electron : `contextIsolation`, `sandbox`, pas de `nodeIntegration`, CSP stricte, navigation externe bloquée.
 
-## Refonte UX/UI (thème noir)
+## Refonte UX/UI (première version, thème sombre)
 
 Design system dans `apps/desktop/src/renderer/styles.css` (tokens CSS) + `tailwind.config.cjs` ; composants dans `ui.tsx`, `overlay.tsx` (toasts, `confirmDialog`), `Shell.tsx` (sidebar repliable, topbar, panneau d'activité, palette Ctrl/Cmd+K) ; textes dans `i18n.ts` (FR, prêt pour l'anglais). Pages chargées en lazy-load.
 
