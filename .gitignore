@@ -1,0 +1,7 @@
+node_modules
+dist
+.scratch
+*.sqlite*
+release
+*.log
+window-state.json
