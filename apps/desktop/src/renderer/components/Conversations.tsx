@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ImagePlus, Paperclip, X as XIcon, Star, Search, Plus, Archive, ArchiveRestore, Trash2, Download, Copy, Check, RefreshCw, Send, Square, History, MessageSquare, CornerUpRight, Pencil, GitBranch, ShieldAlert, Loader2, XCircle, ChevronRight, Lock, FolderGit2, FileText } from "lucide-react";
 import { api, fmt, usd, ago } from "../api"; import { useData } from "../hooks"; import { toast, confirmDialog } from "../overlay";
 import { Badge, Drawer, Modal, Field, Segmented, Disclaimer, StatusIndicator } from "../ui";
-import { Md, ToolCallBlock } from "../pages/Sessions"; import { LimitBanner } from "./LimitBanner"; import { Composer, type Attach } from "./Composer"; import { useAttachFlow } from "./attachFlow"; import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, effortLabel } from "./AIModelConfiguration";
+import { Md, ToolCallBlock } from "../pages/Sessions"; import { LimitBanner } from "./LimitBanner"; import { Composer, type Attach } from "./Composer"; import { useAttachFlow } from "./attachFlow"; import { ChatActions } from "./RichBlocks"; import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, effortLabel } from "./AIModelConfiguration";
 
 // ---------------- liste ----------------
+const RICH_LABEL: Record<string, string> = { quiz: "QCM", qcm: "QCM", choices: "Choix", chart: "Graphique", mermaid: "Diagramme", artifact: "Aperçu HTML", svg: "Image SVG" };
+/** Aperçu d'une conversation : les blocs enrichis (JSON, HTML) sont remplacés par leur nom au lieu d'afficher le code brut. */
+const cleanPreview = (p: unknown) => String(p).replace(/```(\w+)[\s\S]*?(```|$)/g, (_m, l: string) => (RICH_LABEL[l] ? `[${RICH_LABEL[l]}]` : "[code]")).replace(/\s+/g, " ").trim().slice(0, 60);
 export function ConversationList({ mode, selected, onSelect, onNew, projectId, newLabel = "Nouveau chat", emptyHint }: { mode: Mode; selected?: string; onSelect: (id: string) => void; onNew: () => void; projectId?: string; newLabel?: string; emptyHint?: string }) {
   const [q, setQ] = useState(""); const [view, setView] = useState<"recent" | "fav" | "archived">("recent");
   const f = useMemo(() => ({ mode, q: q || undefined, favorite: view === "fav", archived: view === "archived", projectId, submode: mode === "code" ? "direct" : undefined }), [mode, q, view, projectId]);
@@ -22,7 +25,7 @@ export function ConversationList({ mode, selected, onSelect, onNew, projectId, n
             {selected === c.id && <span className="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r-full bg-accent anim-fade" aria-hidden />}
             <div className="flex items-center gap-1.5"><span className="text-[13px] font-medium truncate flex-1">{c.title}</span>{c.active > 0 && <Loader2 size={12} className="animate-spin text-accent shrink-0" aria-label="Réponse en cours" />}
               <button aria-label={c.favorite ? "Retirer des favoris" : "Ajouter aux favoris"} className={`shrink-0 transition-opacity ${c.favorite ? "text-warning" : "text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`} onClick={async (e) => { e.stopPropagation(); await api("conv.favorite", c.id, !c.favorite); reload(); }}><Star size={13} fill={c.favorite ? "currentColor" : "none"} /></button></div>
-            <div className="text-xs text-muted truncate mt-0.5">{c.preview ? String(c.preview).replace(/\s+/g, " ").slice(0, 60) : "Conversation vide"}</div>
+            <div className="text-xs text-muted truncate mt-0.5">{c.preview ? cleanPreview(c.preview) : "Conversation vide"}</div>
             <div className="text-2xs text-muted mt-0.5 flex gap-1.5 tnum"><span>{PROVIDER_LABEL[c.provider as "claude" | "codex"]}</span><span>·</span><span>{ago(c.updated_at)}</span>{c.tokens > 0 && <><span>·</span><span>{fmt(c.tokens)} tok</span></>}</div></div>)}</div>)}</div></div>;
 }
 
@@ -89,7 +92,7 @@ export function ConversationView({ id, mode, onChanged, onDeleted, placeholder, 
   const changedCfg = conv.provider !== cfg.provider || (conv.model ?? null) !== cfg.model || (conv.effort ?? null) !== cfg.effort;
   const policyBadge = mode === "chat" ? <span className="inline-flex items-center gap-1 text-xs text-success" title="Aucune commande, aucun fichier, aucun agent. Voir le détail dans la configuration."><Lock size={12} />Chat · sans outils</span> : mode === "work" ? <span className="inline-flex items-center gap-1 text-xs text-info"><FolderGit2 size={12} />Work · dossier de travail dédié</span> : <span className="inline-flex items-center gap-1 text-xs text-warning"><GitBranch size={12} />Code · {project?.name ?? "projet"}</span>;
 
-  return <div className="flex-1 flex flex-col min-w-0 min-h-0">{af.element}
+  return <ChatActions.Provider value={{ send: (t) => void send(t), busy: busy || sending }}><div className="flex-1 flex flex-col min-w-0 min-h-0">{af.element}
     <div className="h-14 shrink-0 border-b border-line flex items-center gap-3 px-5">
       <div className="min-w-0 flex-1">{embedded ? <div className="text-[13px] font-medium">Conversation du travail</div> : renaming ? <input autoFocus className="input !h-8 !w-80" value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => setRenaming(false)} onKeyDown={async (e) => { if (e.key === "Escape") setRenaming(false); if (e.key === "Enter") { await act(() => api("conv.rename", id, title)); setRenaming(false); } }} aria-label="Titre" />
         : <button className="font-medium truncate max-w-full text-left hover:text-accent inline-flex items-center gap-1.5" title="Renommer" onClick={() => { setTitle(conv.title); setRenaming(true); }}>{conv.title}<Pencil size={12} className="text-muted" /></button>}
@@ -128,7 +131,7 @@ export function ConversationView({ id, mode, onChanged, onDeleted, placeholder, 
 
     <UsageDrawer msg={usageMsg} onClose={() => setUsageMsg(undefined)} /><HistoryDrawer id={id} open={hist} onClose={() => setHist(false)} /><ContinueInCode id={id} open={cont} onClose={() => setCont(false)} />
     {project && <GitDiff open={diffOpen} onClose={() => setDiffOpen(false)} path={project.path} />}
-  </div>;
+  </div></ChatActions.Provider>;
 }
 
 function GitDiff({ open, onClose, path }: { open: boolean; onClose: () => void; path: string }) {

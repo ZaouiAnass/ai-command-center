@@ -1,4 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol } from "electron";
+import { randomUUID } from "node:crypto";
+// Aperçus HTML/SVG générés par le modèle : servis par un schéma dédié, avec une politique de sécurité qui autorise les scripts de la page mais aucun accès réseau ; affichés dans un iframe sandbox (origine opaque).
+protocol.registerSchemesAsPrivileged([{ scheme: "acc-artifact", privileges: { standard: true, secure: true } }]);
+const artifacts = new Map<string, string>();
+const ARTIFACT_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; base-uri 'none'; form-action 'none'";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createCore, type Core } from "@acc/core";
@@ -58,6 +63,8 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     "ext.importSkill": async (modes?: any[]) => { const r = await dialog.showOpenDialog(win!, { properties: ["openFile", "openDirectory"], title: "Choisir un dossier de skill ou un fichier SKILL.md" }); if (r.canceled || !r.filePaths[0]) return null; return c.extensions.importSkill(r.filePaths[0], modes); },
     "ext.testSaved": async (id: string) => { const e = (c.db.prepare("SELECT * FROM extensions WHERE id=? AND kind='mcp'").get(id) as any); if (!e) throw new Error("Serveur introuvable"); return c.extensions.test(JSON.parse(e.config)); },
     "ext.importSkillPath": (p: string, modes?: any[]) => { if (!c.system.skills().some((s: any) => s.path === p)) throw new Error("Skill non détectée dans les dossiers connus."); return c.extensions.importSkill(p, modes); },
+    "artifact.put": (html: unknown) => { const s = String(html ?? ""); if (s.length > 1_000_000) throw new Error("Aperçu trop volumineux (1 Mo maximum)."); const id = randomUUID(); artifacts.set(id, s); if (artifacts.size > 100) artifacts.delete(artifacts.keys().next().value as string); return id; },
+    "file.saveText": async (name: unknown, content: unknown) => { const r = await dialog.showSaveDialog(win!, { defaultPath: String(name ?? "fichier.txt") }); if (r.canceled || !r.filePath) return null; (await import("node:fs")).writeFileSync(r.filePath, String(content ?? ""), "utf8"); return r.filePath; },
     "doc.status": () => c.converter.status(), "doc.install": () => c.converter.install(),
     "doc.pick": async () => { const r = await dialog.showOpenDialog(win!, { properties: ["openFile", "multiSelections"], title: "Joindre des documents", filters: [{ name: "Documents, texte et code", extensions: ["pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "epub", "txt", "md", "csv", "tsv", "json", "xml", "yml", "yaml", "log", "sql", "py", "js", "ts", "tsx", "jsx", "java", "c", "cpp", "cs", "go", "rs", "rb", "php", "sh", "ipynb"] }, { name: "Tous les fichiers", extensions: ["*"] }] }); if (r.canceled) return []; r.filePaths.forEach(approve); return r.filePaths; },
     "doc.images": async (paths: unknown) => { const fs = await import("node:fs"); const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }; const out: any[] = []; for (const p of (Array.isArray(paths) ? paths : []).map(String).filter((q) => approved.has(q)).slice(0, 4)) { const ext = (p.split(".").pop() ?? "").toLowerCase(); if (!MIME[ext]) continue; const st = fs.statSync(p); if (st.size > 5 * 1024 * 1024) throw new Error("Image de plus de 5 Mo : " + p.split(String.fromCharCode(92)).pop()); out.push({ name: p.split(String.fromCharCode(92)).join("/").split("/").pop(), mime: MIME[ext], data: fs.readFileSync(p).toString("base64") }); } return out; },
@@ -110,6 +117,7 @@ async function createWindow() {
 
 if (process.platform === "win32") app.setAppUserModelId("local.ai-command-center"); // même identifiant que le raccourci de l'installateur : épinglage et regroupement corrects dans la barre des tâches
 app.whenReady().then(async () => {
+  protocol.handle("acc-artifact", (req) => { const html = artifacts.get(new URL(req.url).pathname.replace(/^\//, "")); if (html === undefined) return new Response("Introuvable", { status: 404 }); return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": ARTIFACT_CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } }); });
   core = createCore({ dataDir: app.getPath("userData"), onTerminalEvent: (e) => { if (win && !win.isDestroyed()) win.webContents.send("acc:term", e); } });
   const table = handlers(core);
   ipcMain.handle("acc:call", async (_e, method: string, args: unknown[]) => {

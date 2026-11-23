@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import ReactMarkdown from "react-markdown"; import remarkGfm from "remark-gfm";
+import ReactMarkdown from "react-markdown"; import remarkGfm from "remark-gfm"; import remarkMath from "remark-math"; import rehypeKatex from "rehype-katex"; import rehypeHighlight from "rehype-highlight";
+import "katex/dist/katex.min.css"; import "highlight.js/styles/github-dark.css"; import { richBlock, RICH_LANGS } from "../components/RichBlocks";
 import { Plus, Search, Send, Square, ChevronRight, Terminal, FilePen, FileSearch, Globe, Wrench, Copy, Check, PanelRight, ShieldAlert, Loader2, CheckCircle2, XCircle, MessageSquare, Cpu } from "lucide-react";
 import { api, fmt, usd, dur, ago } from "../api"; import { useData } from "../hooks"; import { useT } from "../i18n"; import { toast } from "../overlay";
 import { Page, Card, Modal, Field, EmptyState, ErrorState, LoadingSkeleton, Badge, StatusIndicator, Disclaimer } from "../ui";
@@ -8,14 +9,15 @@ import { Page, Card, Modal, Field, EmptyState, ErrorState, LoadingSkeleton, Badg
 const ACTIVE = ["queued", "preparing", "running", "waiting_approval"];
 const THREAD = (e: any) => e.provider_session_id ?? e.id;
 
+const textOf = (n: any): string => typeof n === "string" ? n : Array.isArray(n) ? n.map(textOf).join("") : n?.props ? textOf(n.props.children) : "";
 function CodeBlock({ children }: { children: any }) {
-  const [ok, setOk] = useState(false); const text = String((children as any)?.props?.children ?? "").replace(/\n$/, "");
+  const [ok, setOk] = useState(false); const text = textOf((children as any)?.props?.children).replace(/\n$/, "");
   return <div className="relative group my-3"><pre className="bg-bg border border-line rounded-xl p-4 overflow-auto text-[12.5px] leading-relaxed">{children}</pre>
     <button aria-label="Copier le code" className="btn btn-sm absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" onClick={() => { navigator.clipboard?.writeText(text); setOk(true); setTimeout(() => setOk(false), 1500); }}>{ok ? <Check size={12} /> : <Copy size={12} />}{ok ? "Copié" : "Copier"}</button></div>;
 }
 export const Md = React.memo(function Md({ text }: { text: string }) {
-  return <div className="prose-chat"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  return <div className="prose-chat"><ReactMarkdown remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]} rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true, plainText: ["quiz", "qcm", "choices", "chart", "mermaid", "artifact", "svg"] }]]} components={{
+    pre: ({ children }) => { const el: any = children; const lang = /language-([\w-]+)/.exec(el?.props?.className ?? "")?.[1]; if (lang && RICH_LANGS.has(lang)) { const rb = richBlock(lang, textOf(el.props.children).replace(/\n$/, "")); if (rb) return <>{rb}</>; } return <CodeBlock>{children}</CodeBlock>; },
     code: ({ className, children }) => className ? <code className={`${className} mono`}>{children}</code> : <code className="mono text-[12.5px] bg-raised px-1.5 py-0.5 rounded-md">{children}</code>,
     table: ({ children }) => <div className="overflow-auto my-3"><table className="w-full text-[13px] border border-line rounded-lg">{children}</table></div>, th: ({ children }) => <th className="th bg-panel">{children}</th>, td: ({ children }) => <td className="td">{children}</td>,
     a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="text-accent hover:underline">{children}</a>, ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1">{children}</ul>, ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1">{children}</ol>,

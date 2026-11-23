@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { DB, all, one, run, uid, now, tx } from "./db.js";
 import type { EventBus } from "./events.js";
+import { getSetting } from "./settings.js";
 import type { ExecutionManager } from "./execution.js";
 import type { AICatalog } from "./catalog.js";
 import type { ProviderId } from "./types.js";
@@ -14,6 +15,16 @@ const SYS: Record<ExperienceMode, string> = {
   work: "Tu travailles dans un espace de travail dédié. Les documents sources fournis par l'utilisateur sont dans le sous-dossier `sources/` ; écris tous les livrables (rapports, documents, tableaux) dans le sous-dossier `livrables/`. N'écris nulle part ailleurs. Sois transparent sur ce que tu as réellement fait.",
   code: "",
 };
+/** Blocs enrichis rendus par l'interface (QCM cliquables, choix, graphiques, diagrammes, aperçus HTML, formules). Court à dessein : ajouté à chaque tour, donc coûteux en tokens s'il grossit. */
+export const RICH_PROMPT = [
+  "Affichage riche : tu écris dans une interface graphique (pas un terminal) qui rend des blocs spéciaux ; boutons et graphiques fonctionnent. Utilise des blocs de code balisés :",
+  "- ```quiz : QCM cliquable, corrigé par l'interface. JSON {\"title\":\"…\",\"questions\":[{\"q\":\"…\",\"options\":[\"…\",\"…\"],\"answer\":1,\"explain\":\"…\"}]} (answer = index de la bonne option, en partant de 0 ; tableau si plusieurs). Ne répète pas les réponses hors du bloc.",
+  "- ```choices : question à choix cliquables {\"question\":\"…\",\"options\":[\"A\",\"B\"],\"multiple\":false}. Le choix de l'utilisateur te revient comme message.",
+  "- ```chart : graphique {\"type\":\"bar|line|area|pie\",\"title\":\"…\",\"x\":\"clé\",\"series\":[\"clé numérique\"],\"data\":[{…}]}.",
+  "- ```mermaid : diagramme. ```artifact : page HTML complète autonome (CSS/JS en ligne, aucun réseau) affichée en aperçu interactif. ```svg : image.",
+  "- Formules LaTeX : $$…$$.",
+  "Emploie-les quand ils servent vraiment (quiz, données à comparer, schéma, choix à faire) ; le JSON doit être valide. N'utilise jamais l'outil AskUserQuestion : il n'existe pas ici.",
+].join("\n");
 const ACTIVE = ["queued", "preparing", "running", "waiting_approval"];
 const CONTEXT_MAX = 6000;
 
@@ -48,8 +59,13 @@ export class Conversations {
   history(id: string) { return all<any>(this.db, "SELECT * FROM conversation_config_history WHERE conversation_id=? ORDER BY at, rowid", id); }
   activeExecution(id: string) { return one<any>(this.db, `SELECT id,status FROM agent_executions WHERE conversation_id=? AND status IN ('${ACTIVE.join("','")}') ORDER BY created_at DESC LIMIT 1`, id); }
   /** Invite système du mode ; en Chat, les outils MCP explicitement activés sont annoncés (sinon le modèle croit n'avoir aucun outil). */
+  /** Invite système du mode + (si activé dans les Paramètres) la description des blocs riches que l'interface sait afficher. */
   private systemPromptFor(mode: ExperienceMode, mcpNames: string[]): string | undefined {
-    if (mode === "chat" && mcpNames.length) return "Tu es un assistant conversationnel. Réponds de façon claire et structurée (Markdown), en français sauf demande contraire. Tu n'as accès à aucun fichier ni commande système. Seuls les outils des serveurs MCP suivants, activés explicitement par l'utilisateur, sont disponibles et tu dois les utiliser quand la demande s'y rapporte : " + mcpNames.join(", ") + ".";
+    const base = this.baseSystemPrompt(mode, mcpNames); if (getSetting<boolean>(this.db, "ui.richBlocks", true) === false) return base;
+    return base ? `${base}\n\n${RICH_PROMPT}` : RICH_PROMPT;
+  }
+  private baseSystemPrompt(mode: ExperienceMode, mcpNames: string[]): string | undefined {
+    if (mode === "chat" && mcpNames.length) return"Tu es un assistant conversationnel. Réponds de façon claire et structurée (Markdown), en français sauf demande contraire. Tu n'as accès à aucun fichier ni commande système. Seuls les outils des serveurs MCP suivants, activés explicitement par l'utilisateur, sont disponibles et tu dois les utiliser quand la demande s'y rapporte : " + mcpNames.join(", ") + ".";
     return SYS[mode] || undefined;
   }
   /** Extensions applicables à cette conversation (activées pour son mode) avec leur état local. */

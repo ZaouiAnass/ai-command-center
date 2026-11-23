@@ -294,3 +294,20 @@ Page **MCP et Skills › Mes extensions** : ajoutez à tout moment un serveur MC
 - Conversations groupées par date, messages animés, composer avec halo de focus, suggestions interactives.
 - La taille de la fenêtre s'adapte à l'écran (90 % de la zone utile) et est mémorisée.
 - Contrôle de non-débordement : audit automatique de toutes les pages à 4 tailles de fenêtre (`node tools/audit-overflow.mjs`, application lancée avec `--remote-debugging-port=9333`).
+
+## Réponses enrichies (QCM, graphiques, diagrammes, aperçus)
+
+L'interface n'est pas un terminal : elle affiche des blocs interactifs que le modèle produit dans des blocs de code balisés. Une courte consigne (≈ 300 tokens par message, désactivable dans **Paramètres › Application › Réponses enrichies**) lui explique comment faire.
+
+| Bloc | Rendu |
+|---|---|
+| ```` ```quiz ```` | QCM cliquable : correction immédiate, explications, score et récapitulatif calculés **localement** (aucun token supplémentaire) ; bouton pour discuter des résultats |
+| ```` ```choices ```` | Question à choix cliquables (simple, multiple, « autre ») : le choix est renvoyé au modèle comme message |
+| ```` ```chart ```` | Graphique en barres, courbes, aires ou secteurs, export CSV |
+| ```` ```mermaid ```` | Diagramme (flux, séquence, etc.) |
+| ```` ```artifact ```` | Page HTML/JS complète en **aperçu interactif isolé** (plein écran, copie, enregistrement) ; ```` ```svg ```` pour une image |
+| `$$…$$` | Formules LaTeX (KaTeX) ; coloration syntaxique des blocs de code |
+
+**Sécurité de l'aperçu HTML** : il s'exécute dans un iframe `sandbox` servi par un schéma dédié (`acc-artifact://`) avec une politique de sécurité sans réseau. Le code de l'aperçu ne peut ni accéder à l'application, ni à son stockage, ni à Internet (vérifié). Les états des QCM et des choix sont mémorisés localement par bloc.
+
+Les JSON invalides sont affichés tels quels avec un message, sans faire échouer la réponse. En mode Code, l'outil interactif `AskUserQuestion` de Claude Code n'existe pas (exécution non interactive) : ces blocs en sont l'équivalent.
