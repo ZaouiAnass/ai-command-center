@@ -85,6 +85,7 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     "app.hideQuick": () => { hideQuick(); return true; },
     "app.quit": () => { quitApp(); return true; },
     "conv.branch": (id: string, msgId: string, text: string, cfg: any) => c.conversations.branchFrom(String(id), String(msgId), String(text ?? ""), cfg ?? undefined),
+    "lib.list": (f: any) => c.library.list({ kind: f?.kind || undefined, q: f?.q || undefined, limit: f?.limit }), "lib.get": (id: string) => c.library.get(String(id)),
     "profile.get": () => c.profile.get(), "profile.save": (p: any) => c.profile.save({ about: p?.about, howto: p?.howto, defaultStyle: p?.defaultStyle }),
     "style.list": () => c.profile.list(), "style.saveCustom": (list: any) => c.profile.saveCustom(Array.isArray(list) ? list : []), "conv.setStyle": (id: string, style: string | null) => c.conversations.setStyle(String(id), style ? String(style) : null),
     "doc.status": () => c.converter.status(), "doc.install": () => c.converter.install(),
