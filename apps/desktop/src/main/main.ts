@@ -84,6 +84,7 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     "app.openConversation": (mode: unknown, id: unknown) => { hideQuick(); const m = mode === "code" ? "code" : "chat"; navigateMain(`/${m}?open=${encodeURIComponent(String(id))}`); return true; },
     "app.hideQuick": () => { hideQuick(); return true; },
     "app.quit": () => { quitApp(); return true; },
+    "conv.branch": (id: string, msgId: string, text: string, cfg: any) => c.conversations.branchFrom(String(id), String(msgId), String(text ?? ""), cfg ?? undefined),
     "profile.get": () => c.profile.get(), "profile.save": (p: any) => c.profile.save({ about: p?.about, howto: p?.howto, defaultStyle: p?.defaultStyle }),
     "style.list": () => c.profile.list(), "style.saveCustom": (list: any) => c.profile.saveCustom(Array.isArray(list) ? list : []), "conv.setStyle": (id: string, style: string | null) => c.conversations.setStyle(String(id), style ? String(style) : null),
     "doc.status": () => c.converter.status(), "doc.install": () => c.converter.install(),

@@ -5,6 +5,25 @@ import { Badge, Drawer, Modal, Field, Segmented, Disclaimer, StatusIndicator } f
 import { Md, ToolCallBlock } from "../pages/Sessions"; import { LimitBanner } from "./LimitBanner"; import { Composer, type Attach } from "./Composer"; import { useAttachFlow } from "./attachFlow"; import { useImageInput } from "./imageInput"; import { ChatActions, RichScope } from "./RichBlocks"; import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, effortLabel } from "./AIModelConfiguration";
 
 // ---------------- liste ----------------
+/** Message de l'utilisateur, modifiable : « Modifier » crée une branche (nouvelle conversation) à partir de ce point, l'original reste intact. */
+function UserMessage({ m, canEdit, code, before, onBranch }: { m: any; canEdit: boolean; code: boolean; before: number; onBranch: (text: string) => Promise<void> }) {
+  const raw = String(m.content); const hasFiles = /\n\n[🖼📎] /u.test(raw); const clean = raw.replace(/\n\n[🖼📎] [\s\S]*$/u, "");
+  const [editing, setEditing] = useState(false); const [text, setText] = useState(clean); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const submit = async () => { if (!text.trim() || busy) return; setBusy(true); setErr(""); try { await onBranch(text.trim()); setEditing(false); } catch (e: any) { setErr(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, "")); } finally { setBusy(false); } };
+  if (editing) return <div className="mb-5 msg-in flex justify-end"><div className="w-full max-w-[640px] rounded-2xl border border-accent bg-panel p-3 shadow-lg">
+    <textarea autoFocus className="input !h-auto" rows={Math.min(8, Math.max(3, text.split("\n").length + 1))} value={text} onChange={(e) => setText(e.target.value)} aria-label="Message modifié" onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void submit(); }} />
+    <ul className="text-2xs text-muted mt-2 space-y-0.5 list-disc pl-4"><li>Une <b>nouvelle conversation</b> est créée à partir de ce point ; l'originale reste intacte.</li><li>L'historique précédent (≈ {Math.round(before / 4).toLocaleString("fr-FR")} tokens) est renvoyé au modèle.</li>{hasFiles && <li className="text-warning">Les pièces jointes ne sont pas reprises : ajoutez-les de nouveau si besoin.</li>}{code && <li className="text-warning">Les fichiers déjà modifiés sur le disque ne sont pas annulés.</li>}</ul>
+    {err && <p role="alert" className="text-xs text-danger mt-2">{err}</p>}
+    <div className="flex justify-end gap-2 mt-3"><button className="btn btn-sm" onClick={() => { setEditing(false); setText(clean); }}>Annuler</button><button className="btn btn-sm btn-primary" disabled={!text.trim() || busy} onClick={() => void submit()}>{busy ? "Création…" : "Envoyer dans une nouvelle branche"}</button></div></div></div>;
+  return <div className="group/user flex justify-end items-start gap-1.5 mb-5 msg-in">
+    {canEdit && <button className="btn btn-ghost btn-icon !h-7 !w-7 mt-1.5 opacity-0 group-hover/user:opacity-100 focus-visible:opacity-100 transition-opacity" aria-label="Modifier ce message" title="Modifier et relancer (nouvelle branche)" onClick={() => { setText(clean); setEditing(true); }}><Pencil size={13} /></button>}
+    <div className="max-w-[80%] bg-raised border border-line rounded-2xl rounded-br-md px-4 py-2.5 text-[14px] whitespace-pre-wrap">{m.content}</div></div>;
+}
+/** Bandeau des conversations nées d'une modification de message. */
+function ParentLink({ id, mode }: { id: string; mode: Mode }) {
+  const { data: parent } = useData<any>("conv.get", [id]); if (!parent) return null;
+  return <div className="mb-4 flex items-center gap-2 text-xs text-muted"><GitBranch size={13} className="text-accent" />Branche créée en modifiant un message de <button className="text-accent hover:underline truncate max-w-[280px]" onClick={() => { window.location.hash = `/${mode === "code" ? "code" : "chat"}?open=${id}`; }}>« {String(parent.title).replace(/ \(modifié\)$/, "")} »</button></div>;
+}
 const RICH_LABEL: Record<string, string> = { quiz: "QCM", qcm: "QCM", choices: "Choix", chart: "Graphique", mermaid: "Diagramme", artifact: "Aperçu HTML", svg: "Image SVG" };
 /** Aperçu d'une conversation : les blocs enrichis (JSON, HTML) sont remplacés par leur nom au lieu d'afficher le code brut. */
 const cleanPreview = (p: unknown) => String(p).replace(/```(\w+)[\s\S]*?(```|$)/g, (_m, l: string) => (RICH_LABEL[l] ? `[${RICH_LABEL[l]}]` : "[code]")).replace(/\s+/g, " ").trim().slice(0, 60);
@@ -109,7 +128,7 @@ export function ConversationView({ id, mode, onChanged, onDeleted, placeholder, 
       <div ref={inner} className="max-w-[760px] mx-auto">
         {!msgs?.length && !busy && <div className="text-center text-muted text-[13px] py-16">Écrivez votre premier message ci-dessous.</div>}
         {(msgs?.length ?? 0) > limit && <div className="text-center mb-4"><button className="btn btn-sm" onClick={() => setLimit(limit + 80)}>Afficher les {Math.min(80, (msgs?.length ?? 0) - limit)} messages précédents</button></div>}
-        {(msgs ?? []).slice(-limit).map((m) => m.role === "user" ? <div key={m.id} className="flex justify-end mb-5 msg-in"><div className="max-w-[80%] bg-raised border border-line rounded-2xl rounded-br-md px-4 py-2.5 text-[14px] whitespace-pre-wrap">{m.content}</div></div>
+        {conv.parent_id && <ParentLink id={conv.parent_id} mode={mode} />}{(msgs ?? []).slice(-limit).map((m) => m.role === "user" ? <UserMessage key={m.id} m={m} canEdit={mode !== "work" && !busy && !sending} code={mode === "code"} before={(msgs ?? []).slice(0, (msgs ?? []).findIndex((x) => x.id === m.id)).reduce((n, x) => n + String(x.content).length, 0)} onBranch={async (text) => { const r = await api("conv.branch", id, m.id, text, cfg); window.location.hash = `/${mode === "code" ? "code" : "chat"}?open=${r.id}`; }} />
           : <div key={m.id} className="mb-7 group/msg msg-in">
               {mode !== "chat" && m.execution_id && <ToolsOf execId={m.execution_id} />}
               {m.status === "failed" || m.status === "cancelled" ? <div role="alert" className="text-[13px] text-danger flex gap-2"><XCircle size={15} className="mt-0.5 shrink-0" />{m.content}</div> : <RichScope.Provider value={{ scope: m.id, streaming: false }}><Md text={m.content} /></RichScope.Provider>}

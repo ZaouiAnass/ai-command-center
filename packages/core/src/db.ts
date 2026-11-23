@@ -81,6 +81,7 @@ CREATE INDEX idx_autoruns ON automation_runs(automation_id, at);`,
 `CREATE TABLE extensions (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, config TEXT NOT NULL, modes TEXT NOT NULL, enabled INTEGER DEFAULT 1, created_at TEXT NOT NULL, UNIQUE(kind, name));
 ALTER TABLE conversations ADD COLUMN ext_disabled TEXT;`,
 `ALTER TABLE conversations ADD COLUMN style TEXT;`,
+`ALTER TABLE conversations ADD COLUMN parent_id TEXT;`,
 ];
 
 export function openDb(file: string): DB {

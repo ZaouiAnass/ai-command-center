@@ -75,6 +75,25 @@ export class Conversations {
   /** Extensions applicables à cette conversation (activées pour son mode) avec leur état local. */
   extensions(id: string) { const c = this.get(id); if (!c || !this.ext) return []; const dis: string[] = c.ext_disabled ? JSON.parse(c.ext_disabled) : []; return this.ext.list().filter((e: any) => e.enabled && e.modes.includes(c.mode)).map((e: any) => ({ id: e.id, kind: e.kind, name: e.name, description: e.config.description ?? e.config.url ?? e.config.command ?? "", active: !dis.includes(e.id) })); }
   setExtensionActive(id: string, extId: string, active: boolean) { const c = this.get(id); if (!c) return; const dis = new Set<string>(c.ext_disabled ? JSON.parse(c.ext_disabled) : []); active ? dis.delete(extId) : dis.add(extId); run(this.db, "UPDATE conversations SET ext_disabled=? WHERE id=?", JSON.stringify([...dis]), id); }
+  /**
+   * Modifier un message et relancer : crée une branche (nouvelle conversation) contenant l'historique AVANT ce message, puis envoie le texte modifié dans une session fournisseur neuve
+   * (le CLI ne sait pas « rembobiner » une session : reprendre l'ancienne ferait encore voir au modèle les tours supprimés). L'original reste intact ; les pièces jointes ne sont pas reprises.
+   */
+  async branchFrom(id: string, messageId: string, text: string, cfg?: Partial<ConversationConfig>): Promise<{ id: string; executionId: string }> {
+    const conv = this.get(id); if (!conv) throw new Error("Conversation introuvable");
+    if (conv.mode === "work") throw new Error("La modification de message n'est pas disponible dans Work (conversation liée à un espace de travail).");
+    if (!text.trim()) throw new Error("Le message est vide.");
+    const msgs = all<any>(this.db, "SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at, rowid", id); const idx = msgs.findIndex((m) => m.id === messageId);
+    if (idx < 0) throw new Error("Message introuvable."); if (msgs[idx].role !== "user") throw new Error("Seuls vos propres messages peuvent être modifiés.");
+    if (all(this.db, "SELECT 1 x FROM agent_executions WHERE conversation_id=? AND status IN ('queued','preparing','running','waiting_approval')", id).length) throw new Error("Une réponse est en cours : attendez sa fin ou arrêtez-la.");
+    const nid = uid(); const t = now(); const title = `${String(conv.title).replace(/ \(modifié\)$/, "")} (modifié)`.slice(0, 90);
+    tx(this.db, () => {
+      run(this.db, "INSERT INTO conversations (id,mode,submode,title,provider,model,effort,project_id,work_id,style,ext_disabled,parent_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", nid, conv.mode, conv.submode, title, conv.provider, conv.model, conv.effort, conv.project_id, null, conv.style, conv.ext_disabled, id, t, t);
+      for (const m of msgs.slice(0, idx)) if ((m.role === "user" || m.role === "assistant") && (m.status === "completed" || m.role === "user")) run(this.db, "INSERT INTO conversation_messages (id,conversation_id,role,content,provider,model,effort_applied,execution_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", uid(), nid, m.role, m.content, m.provider, m.model, m.effort_applied, null, m.status, m.created_at);
+    });
+    this.hist(nid, "created", `Branche de « ${conv.title} » (message modifié)`, { parent: id }); this.bus.emit("conversation.created", { id: nid, mode: conv.mode });
+    const r = await this.send(nid, text, cfg ?? { provider: conv.provider, model: conv.model, effort: conv.effort }); return { id: nid, executionId: r.executionId };
+  }
   rename(id: string, title: string) { if (!title.trim()) throw new Error("Titre vide"); run(this.db, "UPDATE conversations SET title=? WHERE id=?", title.trim().slice(0, 120), id); }
   setFavorite(id: string, v: boolean) { run(this.db, "UPDATE conversations SET favorite=? WHERE id=?", v ? 1 : 0, id); }
   setArchived(id: string, v: boolean) { run(this.db, "UPDATE conversations SET archived=? WHERE id=?", v ? 1 : 0, id); }
