@@ -77,7 +77,7 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     // ---- Lanceur global, icône de notification, arrière-plan ----
     "app.setTheme": (mode: unknown) => { const m = mode === "light" || mode === "dark" ? mode : "system"; c.settings.set("ui.theme", m); nativeTheme.themeSource = m; for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#262624" : "#faf9f5"); return m; },
     "app.setZoom": (f: unknown) => { const z = Math.min(1.4, Math.max(0.8, Number(f) || 1)); c.settings.set("ui.zoom", z); win?.webContents.setZoomFactor(z); return z; },
-    "launcher.info": () => ({ packaged: app.isPackaged, shortcut: currentShortcut, shortcutOk, defaultShortcut: DEFAULT_SHORTCUT, keepRunning: !!c.settings.get("app.keepRunning", false), autostart: !!c.settings.get("app.autostart", false) }),
+    "launcher.info": () => ({ trayOk, packaged: app.isPackaged, shortcut: currentShortcut, shortcutOk, defaultShortcut: DEFAULT_SHORTCUT, keepRunning: !!c.settings.get("app.keepRunning", false), autostart: !!c.settings.get("app.autostart", false) }),
     "app.setShortcut": (accel: unknown) => { const a = String(accel ?? "").trim(); const r = registerShortcut(a); if (r.ok) c.settings.set("app.shortcut", a); return { ...r, shortcut: currentShortcut }; },
     "app.setKeepRunning": (v: unknown) => { c.settings.set("app.keepRunning", !!v); return true; },
     "app.setAutostart": (v: unknown) => { if (!app.isPackaged) throw new Error("Disponible dans l'application installée uniquement."); c.settings.set("app.autostart", !!v); app.setLoginItemSettings({ openAtLogin: !!v, args: ["--hidden"] }); return true; },
@@ -135,7 +135,7 @@ ipcMain.on("acc:approve", (_e, p: unknown) => { if (typeof p === "string" && p.l
 // ---------------------------------------------------------------- Instance unique, arrière-plan, lanceur global
 const DEFAULT_SHORTCUT = "Ctrl+Alt+Space"; // Alt+Espace ouvrirait le menu système de Windows
 const gotLock = app.requestSingleInstanceLock(); // une seule instance par dossier de données : sinon deux processus partageraient la base et lanceraient les automatisations en double
-let quitting = false; let tray: Tray | undefined; let quick: BrowserWindow | undefined; let currentShortcut = ""; let shortcutOk = true; const startHidden = process.argv.includes("--hidden");
+let quitting = false; let trayOk = false; let tray: Tray | undefined; let quick: BrowserWindow | undefined; let currentShortcut = ""; let shortcutOk = true; const startHidden = process.argv.includes("--hidden");
 const quitApp = () => { quitting = true; app.quit(); };
 function showMain() { if (!win || win.isDestroyed()) { void createWindow(); return; } if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 function navigateMain(hash: string) { showMain(); const send = () => win?.webContents.send("acc:navigate", hash); if (!win || win.webContents.isLoading()) win?.webContents.once("did-finish-load", send); else send(); }
@@ -163,12 +163,12 @@ function registerShortcut(accel: string): { ok: boolean; error?: string } {
   if (prev) { try { globalShortcut.register(prev, () => void toggleQuick()); } catch { /* ignoré */ } }
   shortcutOk = !!prev; return { ok: false, error: "Ce raccourci est invalide ou déjà utilisé par une autre application." };
 }
-function createTray() {
+function createTray(): boolean {
   try {
-    const img = nativeImage.createFromPath(join(__dirname, "../../build/icon.png")).resize({ width: 20, height: 20 }); tray = new Tray(img); tray.setToolTip("AI Command Center");
+    const img = nativeImage.createFromPath(join(__dirname, "../../build/icon.png")); if (img.isEmpty()) return false; tray = new Tray(img.resize({ width: 20, height: 20 })); tray.setToolTip("AI Command Center");
     tray.setContextMenu(Menu.buildFromTemplate([{ label: "Ouvrir AI Command Center", click: () => showMain() }, { label: "Nouveau chat", click: () => navigateMain("/chat?new=1") }, { label: "Lanceur rapide", click: () => void toggleQuick() }, { type: "separator" }, { label: "Quitter", click: () => quitApp() }]));
-    tray.on("click", () => showMain());
-  } catch { /* icône indisponible : l'application reste utilisable sans */ }
+    tray.on("click", () => showMain()); return true;
+  } catch { return false; /* icône indisponible : l'application reste utilisable, mais le retour depuis l'arrière-plan passe par le raccourci du Bureau */ }
 }
 
 async function createWindow() {
@@ -203,7 +203,7 @@ app.whenReady().then(async () => {
     if (ev.type === "notification" && Notification.isSupported() && core.settings.get("notifications.desktop", true)) new Notification({ title: String(ev.payload.title), body: String(ev.payload.body ?? "") }).show();
   });
   nativeTheme.themeSource = (["light", "dark"].includes(String(core.settings.get("ui.theme", "system"))) ? String(core.settings.get("ui.theme", "system")) : "system") as "light" | "dark" | "system";
-  await createWindow(); createTray(); registerShortcut(String(core.settings.get("app.shortcut", DEFAULT_SHORTCUT)));
+  await createWindow(); trayOk = createTray(); registerShortcut(String(core.settings.get("app.shortcut", DEFAULT_SHORTCUT)));
   if (app.isPackaged) { try { app.setLoginItemSettings({ openAtLogin: !!core.settings.get("app.autostart", false), args: ["--hidden"] }); } catch { /* non bloquant */ } }
   core.allProviders(true).catch(() => {});
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });

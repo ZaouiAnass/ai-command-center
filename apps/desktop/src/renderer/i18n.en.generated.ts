@@ -735,6 +735,7 @@ export const EN_MAP: Record<string, string> = {
  "L'extension ne sera plus disponible dans aucun mode. Les conversations passées ne sont pas modifiées.": "The extension will no longer be available in any mode. Past conversations are not affected.",
  "L'exécution a échoué.": "The run failed.",
  "L'historique précédent (≈": "The previous history (≈",
+ "L'icône de la zone de notification n'a pas pu être créée : en mode arrière-plan, rouvrez l'application avec son raccourci du Bureau.": "The notification area icon couldn't be created: in background mode, reopen the app using its Desktop shortcut.",
  "L'instruction est vide.": "The instruction is empty.",
  "L'interface est traduite à l'exécution (≈ 1 100 libellés). Les messages dynamiques (avec valeurs) et les contenus de conversation restent tels quels. Le changement recharge l'application.": "The interface is translated at runtime (≈ 1,100 labels). Dynamic messages (with values) and conversation content stay as is. Changing the language reloads the app.",
  "L'objectif est vide.": "The goal is empty.",
