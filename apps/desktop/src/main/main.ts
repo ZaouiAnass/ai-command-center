@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, shell, screen, protocol, Tray, Menu, nativeImage, globalShortcut } from "electron";
 import { randomUUID } from "node:crypto";
 // Aperçus HTML/SVG générés par le modèle : servis par un schéma dédié, avec une politique de sécurité qui autorise les scripts de la page mais aucun accès réseau ; affichés dans un iframe sandbox (origine opaque).
 protocol.registerSchemesAsPrivileged([{ scheme: "acc-artifact", privileges: { standard: true, secure: true } }]);
@@ -65,6 +65,14 @@ function handlers(c: Core): Record<string, (...a: any[]) => unknown> {
     "ext.importSkillPath": (p: string, modes?: any[]) => { if (!c.system.skills().some((s: any) => s.path === p)) throw new Error("Skill non détectée dans les dossiers connus."); return c.extensions.importSkill(p, modes); },
     "artifact.put": (html: unknown) => { const s = String(html ?? ""); if (s.length > 1_000_000) throw new Error("Aperçu trop volumineux (1 Mo maximum)."); const id = randomUUID(); artifacts.set(id, s); if (artifacts.size > 100) artifacts.delete(artifacts.keys().next().value as string); return id; },
     "file.saveText": async (name: unknown, content: unknown) => { const r = await dialog.showSaveDialog(win!, { defaultPath: String(name ?? "fichier.txt") }); if (r.canceled || !r.filePath) return null; (await import("node:fs")).writeFileSync(r.filePath, String(content ?? ""), "utf8"); return r.filePath; },
+    // ---- Lanceur global, icône de notification, arrière-plan ----
+    "launcher.info": () => ({ packaged: app.isPackaged, shortcut: currentShortcut, shortcutOk, defaultShortcut: DEFAULT_SHORTCUT, keepRunning: !!c.settings.get("app.keepRunning", false), autostart: !!c.settings.get("app.autostart", false) }),
+    "app.setShortcut": (accel: unknown) => { const a = String(accel ?? "").trim(); const r = registerShortcut(a); if (r.ok) c.settings.set("app.shortcut", a); return { ...r, shortcut: currentShortcut }; },
+    "app.setKeepRunning": (v: unknown) => { c.settings.set("app.keepRunning", !!v); return true; },
+    "app.setAutostart": (v: unknown) => { if (!app.isPackaged) throw new Error("Disponible dans l'application installée uniquement."); c.settings.set("app.autostart", !!v); app.setLoginItemSettings({ openAtLogin: !!v, args: ["--hidden"] }); return true; },
+    "app.openConversation": (mode: unknown, id: unknown) => { hideQuick(); const m = mode === "code" ? "code" : "chat"; navigateMain(`/${m}?open=${encodeURIComponent(String(id))}`); return true; },
+    "app.hideQuick": () => { hideQuick(); return true; },
+    "app.quit": () => { quitApp(); return true; },
     "doc.status": () => c.converter.status(), "doc.install": () => c.converter.install(),
     "doc.pick": async () => { const r = await dialog.showOpenDialog(win!, { properties: ["openFile", "multiSelections"], title: "Joindre des documents", filters: [{ name: "Documents, texte et code", extensions: ["pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "epub", "txt", "md", "csv", "tsv", "json", "xml", "yml", "yaml", "log", "sql", "py", "js", "ts", "tsx", "jsx", "java", "c", "cpp", "cs", "go", "rs", "rb", "php", "sh", "ipynb"] }, { name: "Tous les fichiers", extensions: ["*"] }] }); if (r.canceled) return []; r.filePaths.forEach(approve); return r.filePaths; },
     "doc.images": async (paths: unknown) => { const fs = await import("node:fs"); const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }; const out: any[] = []; for (const p of (Array.isArray(paths) ? paths : []).map(String).filter((q) => approved.has(q)).slice(0, 4)) { const ext = (p.split(".").pop() ?? "").toLowerCase(); if (!MIME[ext]) continue; const st = fs.statSync(p); if (st.size > 5 * 1024 * 1024) throw new Error("Image de plus de 5 Mo : " + p.split(String.fromCharCode(92)).pop()); out.push({ name: p.split(String.fromCharCode(92)).join("/").split("/").pop(), mime: MIME[ext], data: fs.readFileSync(p).toString("base64") }); } return out; },
@@ -105,11 +113,53 @@ function trackWinState(w: BrowserWindow) {
 const approved = new Set<string>(); const approve = (p: string) => { if (approved.size > 500) approved.clear(); approved.add(p); };
 ipcMain.on("acc:approve", (_e, p: unknown) => { if (typeof p === "string" && p.length < 1024) approve(p); });
 
+// ---------------------------------------------------------------- Instance unique, arrière-plan, lanceur global
+const DEFAULT_SHORTCUT = "Ctrl+Alt+Space"; // Alt+Espace ouvrirait le menu système de Windows
+const gotLock = app.requestSingleInstanceLock(); // une seule instance par dossier de données : sinon deux processus partageraient la base et lanceraient les automatisations en double
+let quitting = false; let tray: Tray | undefined; let quick: BrowserWindow | undefined; let currentShortcut = ""; let shortcutOk = true; const startHidden = process.argv.includes("--hidden");
+const quitApp = () => { quitting = true; app.quit(); };
+function showMain() { if (!win || win.isDestroyed()) { void createWindow(); return; } if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+function navigateMain(hash: string) { showMain(); const send = () => win?.webContents.send("acc:navigate", hash); if (!win || win.webContents.isLoading()) win?.webContents.once("did-finish-load", send); else send(); }
+app.on("second-instance", () => showMain());
+function guard(w: BrowserWindow) {
+  w.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: "deny" }; });
+  w.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("http://localhost:5173") && !url.startsWith("file:")) e.preventDefault(); });
+}
+async function loadRenderer(w: BrowserWindow, hash = "") { if (isDev) await w.loadURL("http://localhost:5173/" + (hash ? "#" + hash : "")); else await w.loadFile(join(__dirname, "../renderer/index.html"), hash ? { hash } : undefined); }
+async function ensureQuick(): Promise<BrowserWindow> {
+  if (quick && !quick.isDestroyed()) return quick;
+  quick = new BrowserWindow({ width: 700, height: 200, show: false, frame: false, transparent: true, resizable: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false, title: "Lanceur rapide", webPreferences: { preload: join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  guard(quick); quick.on("blur", () => { if (quick && !quick.webContents.isDevToolsOpened()) quick.hide(); }); quick.on("closed", () => { quick = undefined; });
+  await loadRenderer(quick, "/quick"); return quick;
+}
+function hideQuick() { if (quick && !quick.isDestroyed()) quick.hide(); }
+async function toggleQuick() {
+  const q = await ensureQuick(); if (q.isVisible()) { q.hide(); return; }
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea; q.setBounds({ x: Math.round(d.x + (d.width - 700) / 2), y: Math.round(d.y + d.height * 0.16), width: 700, height: 200 }); q.show(); q.focus();
+}
+function registerShortcut(accel: string): { ok: boolean; error?: string } {
+  const prev = currentShortcut; if (prev) globalShortcut.unregister(prev);
+  if (!accel) { currentShortcut = ""; shortcutOk = true; return { ok: true }; }
+  try { if (globalShortcut.register(accel, () => void toggleQuick())) { currentShortcut = accel; shortcutOk = true; return { ok: true }; } } catch { /* accélérateur invalide */ }
+  if (prev) { try { globalShortcut.register(prev, () => void toggleQuick()); } catch { /* ignoré */ } }
+  shortcutOk = !!prev; return { ok: false, error: "Ce raccourci est invalide ou déjà utilisé par une autre application." };
+}
+function createTray() {
+  try {
+    const img = nativeImage.createFromPath(join(__dirname, "../../build/icon.png")).resize({ width: 20, height: 20 }); tray = new Tray(img); tray.setToolTip("AI Command Center");
+    tray.setContextMenu(Menu.buildFromTemplate([{ label: "Ouvrir AI Command Center", click: () => showMain() }, { label: "Nouveau chat", click: () => navigateMain("/chat?new=1") }, { label: "Lanceur rapide", click: () => void toggleQuick() }, { type: "separator" }, { label: "Quitter", click: () => quitApp() }]));
+    tray.on("click", () => showMain());
+  } catch { /* icône indisponible : l'application reste utilisable sans */ }
+}
+
 async function createWindow() {
   const b = initialBounds(); const wa = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({ ...b, minWidth: Math.min(900, wa.width), minHeight: Math.min(600, wa.height), show: false, backgroundColor: "#0b0d12", title: "AI Command Center", autoHideMenuBar: true, icon: join(__dirname, "../../build/icon.png"),
     webPreferences: { preload: join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
-  if (b.maximized) win.maximize(); win.once("ready-to-show", () => win?.show()); trackWinState(win);
+  if (b.maximized) win.maximize(); win.once("ready-to-show", () => { if (!(startHidden && core?.settings.get("app.keepRunning", false))) win?.show(); }); trackWinState(win);
+  // Fermer la fenêtre : mise en arrière-plan (icône près de l'horloge) si activé, sinon l'application se ferme. « Quitter » du menu de l'icône quitte vraiment.
+  win.on("close", (e) => { if (!quitting && core?.settings.get("app.keepRunning", false)) { e.preventDefault(); win?.hide(); } });
+  win.on("closed", () => { win = null; if (!quitting) quitApp(); });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("http://localhost:5173") && !url.startsWith("file:")) e.preventDefault(); });
   if (isDev) await win.loadURL("http://localhost:5173"); else await win.loadFile(join(__dirname, "../renderer/index.html"));
@@ -117,6 +167,7 @@ async function createWindow() {
 
 if (process.platform === "win32") app.setAppUserModelId("local.ai-command-center"); // même identifiant que le raccourci de l'installateur : épinglage et regroupement corrects dans la barre des tâches
 app.whenReady().then(async () => {
+  if (!gotLock) { app.quit(); return; }
   protocol.handle("acc-artifact", (req) => { const html = artifacts.get(new URL(req.url).pathname.replace(/^\//, "")); if (html === undefined) return new Response("Introuvable", { status: 404 }); return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": ARTIFACT_CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } }); });
   core = createCore({ dataDir: app.getPath("userData"), onTerminalEvent: (e) => { if (win && !win.isDestroyed()) win.webContents.send("acc:term", e); } });
   const table = handlers(core);
@@ -131,9 +182,11 @@ app.whenReady().then(async () => {
     win?.webContents.send("acc:event", ev);
     if (ev.type === "notification" && Notification.isSupported() && core.settings.get("notifications.desktop", true)) new Notification({ title: String(ev.payload.title), body: String(ev.payload.body ?? "") }).show();
   });
-  await createWindow();
+  await createWindow(); createTray(); registerShortcut(String(core.settings.get("app.shortcut", DEFAULT_SHORTCUT)));
+  if (app.isPackaged) { try { app.setLoginItemSettings({ openAtLogin: !!core.settings.get("app.autostart", false), args: ["--hidden"] }); } catch { /* non bloquant */ } }
   core.allProviders(true).catch(() => {});
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
 });
 app.on("before-quit", async (e) => { if (core && !(app as any).__closing) { e.preventDefault(); (app as any).__closing = true; await core.close().catch(() => {}); app.quit(); } });
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+app.on("will-quit", () => { globalShortcut.unregisterAll(); });
+app.on("window-all-closed", () => { if (process.platform !== "darwin") quitApp(); });

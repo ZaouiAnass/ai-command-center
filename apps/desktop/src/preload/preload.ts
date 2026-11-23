@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld("acc", {
   call: (method: string, ...args: unknown[]) => ipcRenderer.invoke("acc:call", method, args),
   pathForFile: (f: File) => { try { return webUtils.getPathForFile(f); } catch { return ""; } },
   onTerminal: (cb: (e: unknown) => void) => { const h = (_: unknown, e: unknown) => cb(e); ipcRenderer.on("acc:term", h); return () => ipcRenderer.removeListener("acc:term", h); },
+  onNavigate: (cb: (hash: string) => void) => { const h = (_: unknown, hash: string) => cb(hash); ipcRenderer.on("acc:navigate", h); return () => ipcRenderer.removeListener("acc:navigate", h); },
   onEvent: (cb: (e: unknown) => void) => { const h = (_: unknown, e: unknown) => cb(e); ipcRenderer.on("acc:event", h); return () => ipcRenderer.removeListener("acc:event", h); },
 });
