@@ -5,6 +5,9 @@ import { api } from "../api"; import { toast } from "../overlay"; import { Modal
 
 /** Actions de la conversation disponibles pour les blocs interactifs (envoyer une réponse cliquée au modèle). Absent hors conversation : les blocs deviennent en lecture seule. */
 export const ChatActions = createContext<{ send?: (text: string) => void; busy?: boolean }>({});
+/** Portée d'un bloc : identifiant du message (états mémorisés par message, pas par contenu) et mode « en cours de génération » (JSON/diagramme/page encore incomplets). */
+export const RichScope = createContext<{ scope: string; streaming: boolean }>({ scope: "", streaming: false });
+const Pending = ({ what }: { what: string }) => <div className="my-4 rounded-2xl border border-line bg-panel/50 px-4 py-6 flex items-center gap-2.5 text-[13px] text-muted not-prose" role="status"><Loader2 size={15} className="animate-spin text-accent" />Préparation {what}…</div>;
 
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* indisponible */ } } };
 const hash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
@@ -32,9 +35,9 @@ export function parseQuiz(raw: string): { title?: string; questions: Q[] } | str
   return { title: typeof s?.title === "string" ? s.title : undefined, questions };
 }
 function QuizBlock({ raw }: { raw: string }) {
-  const ctx = useContext(ChatActions); const spec = parseQuiz(raw); const key = "acc.quiz." + hash(raw);
+  const ctx = useContext(ChatActions); const sc = useContext(RichScope); const spec = parseQuiz(raw); const key = `acc.quiz.${sc.scope}.${hash(raw)}`;
   const [st, setSt] = useStored<{ picks: (number[] | null)[]; step: number }>(key, { picks: [], step: 0 }); const [draft, setDraft] = useState<number[]>([]);
-  if (typeof spec === "string") return errBox("QCM", raw, spec);
+  if (typeof spec === "string") return sc.streaming ? <Pending what="du QCM" /> : errBox("QCM", raw, spec);
   const { questions: qs } = spec; const n = qs.length; const step = Math.min(st.step, n); const q = qs[step]; const graded = qs.every((x) => x.answer);
   const ok = (i: number) => { const p = st.picks[i]; const a = qs[i]!.answer; return !!p && !!a && p.length === a.length && a.every((v) => p.includes(v)); };
   const score = qs.filter((_, i) => ok(i)).length;
@@ -61,9 +64,9 @@ function QuizBlock({ raw }: { raw: string }) {
 
 // ---------------------------------------------------------------- Choix posés par le modèle
 function ChoicesBlock({ raw }: { raw: string }) {
-  const ctx = useContext(ChatActions); const p = parse(raw); const key = "acc.choice." + hash(raw); const [done, setDone] = useStored<string[] | null>(key, null); const [sel, setSel] = useState<string[]>([]); const [other, setOther] = useState("");
-  if (!p.ok) return errBox("Choix", raw, p.e); const s = p.v; const opts: { label: string; description?: string }[] = (Array.isArray(s) ? s : s?.options ?? []).map((o: any) => typeof o === "string" ? { label: o } : { label: String(o?.label ?? ""), description: o?.description ? String(o.description) : undefined }).filter((o: any) => o.label);
-  if (opts.length < 2 || opts.length > 10) return errBox("Choix", raw, "2 à 10 options attendues"); const multiple = !!s?.multiple; const locked = !!done || !ctx.send;
+  const ctx = useContext(ChatActions); const sc = useContext(RichScope); const p = parse(raw); const key = `acc.choice.${sc.scope}.${hash(raw)}`; const [done, setDone] = useStored<string[] | null>(key, null); const [sel, setSel] = useState<string[]>([]); const [other, setOther] = useState("");
+  if (!p.ok) return sc.streaming ? <Pending what="de la question" /> : errBox("Choix", raw, p.e); const s = p.v; const opts: { label: string; description?: string }[] = (Array.isArray(s) ? s : s?.options ?? []).map((o: any) => typeof o === "string" ? { label: o } : { label: String(o?.label ?? ""), description: o?.description ? String(o.description) : undefined }).filter((o: any) => o.label);
+  if (opts.length < 2 || opts.length > 10) return errBox("Choix", raw, "2 à 10 options attendues"); const multiple = !!s?.multiple; const locked = !!done || !ctx.send || sc.streaming;
   const submit = (labels: string[]) => { if (!ctx.send || ctx.busy) return; setDone(labels); ctx.send(labels.length === 1 ? `Mon choix : ${labels[0]}` : `Mes choix : ${labels.join(", ")}`); };
   return <Shell icon={ListChecks} title={typeof s?.question === "string" ? s.question : "Votre choix"}><div className="p-4"><div className="grid gap-2 sm:grid-cols-2">{opts.map((o, i) => { const on = (done ?? sel).includes(o.label);
     return <button key={i} disabled={locked && !on} aria-pressed={on} onClick={() => { if (locked) return; if (multiple) setSel(on ? sel.filter((x) => x !== o.label) : [...sel, o.label]); else submit([o.label]); }}
@@ -76,7 +79,7 @@ function ChoicesBlock({ raw }: { raw: string }) {
 // ---------------------------------------------------------------- Graphiques
 const num = (v: any) => typeof v === "number" && isFinite(v);
 function ChartBlock({ raw }: { raw: string }) {
-  const p = parse(raw); const [ok, setOk] = useState(false); if (!p.ok) return errBox("Graphique", raw, p.e); const s = p.v;
+  const sc = useContext(RichScope); const p = parse(raw); const [ok, setOk] = useState(false); if (!p.ok) return sc.streaming ? <Pending what="du graphique" /> : errBox("Graphique", raw, p.e); const s = p.v;
   const data: Record<string, any>[] = Array.isArray(s?.data) ? s.data.filter((d: any) => d && typeof d === "object").slice(0, 500) : []; if (!data.length) return errBox("Graphique", raw, "aucune donnée");
   const keys = Object.keys(data[0]!); const x: string = typeof s.x === "string" && keys.includes(s.x) ? s.x : keys.find((k) => !num(data[0]![k])) ?? keys[0]!;
   const series: string[] = (Array.isArray(s.series) ? s.series : typeof s.y === "string" ? [s.y] : keys.filter((k) => k !== x && data.some((d) => num(d[k])))).filter((k: string) => keys.includes(k)).slice(0, 8); if (!series.length) return errBox("Graphique", raw, "aucune série numérique");
@@ -95,9 +98,13 @@ function ChartBlock({ raw }: { raw: string }) {
 // ---------------------------------------------------------------- Diagrammes Mermaid (chargés à la demande)
 let mermaidP: Promise<any> | undefined;
 function MermaidBlock({ code }: { code: string }) {
+  const sc = useContext(RichScope); if (sc.streaming) return <Pending what="du diagramme" />;
+  return <MermaidView code={code} />;
+}
+function MermaidView({ code }: { code: string }) {
   const [svg, setSvg] = useState<string>(); const [err, setErr] = useState<string>(); const [src, setSrc] = useState(false); const id = useRef("m" + Math.random().toString(36).slice(2, 9));
   useEffect(() => { let off = false; setErr(undefined);
-    (mermaidP ??= import("mermaid").then((m) => { m.default.initialize({ startOnLoad: false, securityLevel: "strict", theme: "base", fontFamily: "Inter Variable, Segoe UI, sans-serif", themeVariables: { background: "#2d2c2a", primaryColor: "#3d3c39", primaryTextColor: "#faf9f5", primaryBorderColor: "#e0865f", lineColor: "#9d9b92", secondaryColor: "#343330", tertiaryColor: "#262624", textColor: "#faf9f5", noteBkgColor: "#343330", noteTextColor: "#faf9f5" } }); return m.default; }))
+    (mermaidP ??= import("mermaid").then((m) => { m.default.initialize({ startOnLoad: false, suppressErrorRendering: true, securityLevel: "strict", theme: "base", fontFamily: "Inter Variable, Segoe UI, sans-serif", themeVariables: { background: "#2d2c2a", primaryColor: "#3d3c39", primaryTextColor: "#faf9f5", primaryBorderColor: "#e0865f", lineColor: "#9d9b92", secondaryColor: "#343330", tertiaryColor: "#262624", textColor: "#faf9f5", noteBkgColor: "#343330", noteTextColor: "#faf9f5" } }); return m.default; }))
       .then((m) => m.render(id.current, code)).then((r: any) => { if (!off) setSvg(r.svg); }).catch((e: any) => { if (!off) setErr(String(e?.message ?? e).split("\n")[0]!.slice(0, 160)); });
     return () => { off = true; }; }, [code]);
   return <Shell icon={GitBranch} title="Diagramme" right={<button className="btn btn-ghost btn-sm" onClick={() => setSrc(!src)}>{src ? <Eye size={13} /> : <Code2 size={13} />}{src ? "Diagramme" : "Code"}</button>}>
@@ -107,6 +114,10 @@ function MermaidBlock({ code }: { code: string }) {
 
 // ---------------------------------------------------------------- Aperçu HTML / SVG isolé (cadre sans accès réseau ni à l'application)
 function ArtifactBlock({ code, kind }: { code: string; kind: "html" | "svg" }) {
+  const sc = useContext(RichScope); if (sc.streaming) return <Pending what={kind === "svg" ? "de l'image" : "de l'aperçu"} />;
+  return <ArtifactView code={code} kind={kind} />;
+}
+function ArtifactView({ code, kind }: { code: string; kind: "html" | "svg" }) {
   const [tab, setTab] = useState<"view" | "code">("view"); const [url, setUrl] = useState<string>(); const [full, setFull] = useState(false); const [ok, setOk] = useState(false);
   const html = kind === "svg" ? `<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#fff">${code}</body>` : code;
   useEffect(() => { let off = false; setUrl(undefined); api("artifact.put", html).then((id: string) => { if (!off) setUrl(`acc-artifact://a/${id}`); }).catch(() => {}); return () => { off = true; }; }, [html]);

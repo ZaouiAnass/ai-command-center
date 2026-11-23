@@ -124,6 +124,7 @@ export function buildClaudeArgs(req: RunRequest): string[] {
   if (req.mcp?.length) { args.push("--mcp-config", mcpConfigPath(req), "--allowedTools", ...req.mcp.map((m) => `mcp__${m.name}`)); } // extensions MCP activées explicitement par l'utilisateur
   // Chat : aucun outil intégré, aucun serveur MCP, aucune skill, et seuls les réglages du dossier isolé sont lus
   // (ni hooks ni mémoire utilisateur) — options officielles du CLI, sans toucher à l'authentification par abonnement.
+  if (pol !== "chat") args.push("--disallowedTools", "AskUserQuestion"); // outil interactif impossible en mode non interactif : le modèle utilise les blocs ```choices/quiz à la place
   if (pol === "chat") args.push("--tools", "", "--setting-sources", "project", "--strict-mcp-config", "--disable-slash-commands");
   if (req.effort) args.push("--effort", req.effort);
   if (req.model) args.push("--model", req.model);

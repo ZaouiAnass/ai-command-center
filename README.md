@@ -297,7 +297,7 @@ Page **MCP et Skills › Mes extensions** : ajoutez à tout moment un serveur MC
 
 ## Réponses enrichies (QCM, graphiques, diagrammes, aperçus)
 
-L'interface n'est pas un terminal : elle affiche des blocs interactifs que le modèle produit dans des blocs de code balisés. Une courte consigne (≈ 300 tokens par message, désactivable dans **Paramètres › Application › Réponses enrichies**) lui explique comment faire.
+L'interface n'est pas un terminal : elle affiche des blocs interactifs que le modèle produit dans des blocs de code balisés. Une courte consigne (≈ 470 tokens par message avec Claude, ≈ 280 avec Codex, mesurés ; désactivable dans **Paramètres › Application › Réponses enrichies**) lui explique comment faire.
 
 | Bloc | Rendu |
 |---|---|
