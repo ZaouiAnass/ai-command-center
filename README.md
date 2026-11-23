@@ -163,7 +163,7 @@ Tout ce qui figure dans les sections ci-dessous est implémenté et a été test
 - Interface vérifiée par audit automatique à 4 tailles de fenêtre ; pas de test sur de vrais petits écrans, d'autres facteurs d'échelle Windows, ni avec un lecteur d'écran.
 
 **Fonctionnel**
-- Les automatisations ne s'exécutent que **pendant que l'application est ouverte** (pas de démarrage avec Windows ni d'exécution en arrière-plan).
+- Automatisations : elles s'exécutent tant que l'application tourne. Le mode **arrière-plan** (Paramètres › Application) la garde active près de l'horloge et peut la lancer au démarrage de Windows (version installée) ; je n'ai pas observé une automatisation planifiée se déclencher fenêtre masquée.
 - En Chat, l'interdiction des outils est stricte côté Claude ; côté Codex elle repose sur une **surveillance** (l'outil interdit est interrompu et journalisé), pas sur un bac à sable.
 - Serveurs MCP distants : l'authentification OAuth n'est pas gérée et le test ne vérifie que la joignabilité.
 - Traduction anglaise : l'interface fixe est traduite, mais pas tous les messages dynamiques ni le contenu des conversations.
@@ -311,3 +311,18 @@ L'interface n'est pas un terminal : elle affiche des blocs interactifs que le mo
 **Sécurité de l'aperçu HTML** : il s'exécute dans un iframe `sandbox` servi par un schéma dédié (`acc-artifact://`) avec une politique de sécurité sans réseau. Le code de l'aperçu ne peut ni accéder à l'application, ni à son stockage, ni à Internet (vérifié). Les états des QCM et des choix sont mémorisés localement par bloc.
 
 Les JSON invalides sont affichés tels quels avec un message, sans faire échouer la réponse. En mode Code, l'outil interactif `AskUserQuestion` de Claude Code n'existe pas (exécution non interactive) : ces blocs en sont l'équivalent.
+
+## Confort d'usage (huit fonctions)
+
+| Fonction | Où | À savoir |
+|---|---|---|
+| **Lanceur global** | `Ctrl+Alt+Espace` (modifiable), icône près de l'horloge | Petite fenêtre : une question, Entrée, la conversation s'ouvre ici. Instance unique ; option « garder en arrière-plan » et « lancer au démarrage » (version installée). Si le raccourci est déjà pris, les Paramètres l'indiquent. |
+| **Coller une image / capturer l'écran** | `Ctrl+V` dans la zone de saisie, bouton écran | Le texte collé reste du texte. Les images sont réduites à 1920 px (économie de tokens). |
+| **Instructions et styles** | Paramètres › Personnalisation, sélecteur dans la fenêtre du modèle | « À propos de vous », manière de répondre, 5 styles fournis + les vôtres ; rien n'est ajouté tant que les champs sont vides. |
+| **Thème clair** | Paramètres › Application › Apparence | Système, clair ou sombre ; taille de l'interface 90 à 125 %. Contrastes calculés (texte ≥ 4,5:1). |
+| **Modifier un message et relancer** | Crayon sur vos messages (Chat et Code) | Crée une **nouvelle conversation** (l'original reste intact) avec l'historique précédent. Les pièces jointes ne sont pas reprises ; en Code, les fichiers déjà modifiés ne sont pas annulés. Non disponible dans Work. |
+| **Bibliothèque** | Menu › Bibliothèque | QCM, graphiques, diagrammes, pages et images retrouvés dans toutes les conversations, avec recherche et filtres. |
+| **Recherche web dans le Chat** | Fenêtre du modèle › Recherche web | **Opt-in par conversation** : le Chat n'est alors plus « sans outils » (badge visible) ; seuls les outils web sont autorisés. Les pages lues coûtent des tokens (mesuré : environ 45 000 avec Codex, 74 000 avec Claude sur une question). Sans activation, la recherche est explicitement désactivée pour Codex. |
+| **Introduction** | Première ouverture (installation vierge), rouvrable dans Paramètres | Présente les modes, l'état des abonnements, des préférences. Ne lance aucune connexion et ne demande jamais d'identifiants. |
+
+Quand le Chat bloque un outil non autorisé, le message de réponse nomme l'outil et explique comment faire (activer la recherche web, ou utiliser Code).
