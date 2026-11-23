@@ -151,7 +151,23 @@ Prérequis : Node ≥ 22 (utilise `node:sqlite`), Git, `claude` et `codex` insta
 
 ## Limitations connues (honnêtes)
 
-Non implémenté dans cette livraison : **terminal intégré (xterm/PTY)**, workflows et éditeur React Flow, comparaison Claude/Codex, Smart Router, mémoire de projet, MCP/Skills, automatisations, Quality Center, budgets USD, i18n anglais, tests Playwright, packaging/installateur (script `package` présent mais **non validé**), sauvegarde/restauration.
+Tout ce qui figure dans les sections ci-dessous est implémenté et a été testé, mais l'application n'est pas « finie » pour autant. Ce qui manque ou reste limité :
+
+**Distribution**
+- Installateur **non signé** (certificat de signature de code requis) ; **Windows seulement**, macOS et Linux ne sont ni construits ni testés.
+- Mise à jour automatique : la détection d'une nouvelle version est testée, pas le téléchargement ni l'installation, et aucun serveur de mises à jour n'est configuré.
+- Pas de *Release* GitHub publiée, pas d'intégration continue, pas de licence.
+
+**Fiabilité**
+- Tests unitaires et scénarios réels (Claude, Codex, interface via le port de débogage), mais **pas de suite Playwright** ni de CI.
+- Interface vérifiée par audit automatique à 4 tailles de fenêtre ; pas de test sur de vrais petits écrans, d'autres facteurs d'échelle Windows, ni avec un lecteur d'écran.
+
+**Fonctionnel**
+- Les automatisations ne s'exécutent que **pendant que l'application est ouverte** (pas de démarrage avec Windows ni d'exécution en arrière-plan).
+- En Chat, l'interdiction des outils est stricte côté Claude ; côté Codex elle repose sur une **surveillance** (l'outil interdit est interrompu et journalisé), pas sur un bac à sable.
+- Serveurs MCP distants : l'authentification OAuth n'est pas gérée et le test ne vérifie que la joignabilité.
+- Traduction anglaise : l'interface fixe est traduite, mais pas tous les messages dynamiques ni le contenu des conversations.
+- Les quotas des fournisseurs ne peuvent pas être contournés (par conception) ; les Chat/Work **natifs** de claude.ai et ChatGPT ne sont pas accessibles (aucune API officielle).
 
 Écarts d'architecture : monorepo réduit à `packages/core` (+ `apps/desktop`) ; SQL brut au lieu de Drizzle ; pas de Zod sur l'IPC (liste blanche de méthodes à la place) ; pas de shadcn/Monaco/TanStack Query.
 
