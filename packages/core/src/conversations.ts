@@ -63,8 +63,10 @@ export class Conversations {
   activeExecution(id: string) { return one<any>(this.db, `SELECT id,status FROM agent_executions WHERE conversation_id=? AND status IN ('${ACTIVE.join("','")}') ORDER BY created_at DESC LIMIT 1`, id); }
   /** Invite système du mode ; en Chat, les outils MCP explicitement activés sont annoncés (sinon le modèle croit n'avoir aucun outil). */
   /** Invite système du mode + (si activé dans les Paramètres) la description des blocs riches que l'interface sait afficher. */
-  private systemPromptFor(mode: ExperienceMode, mcpNames: string[], style?: string | null, web = false): string | undefined {
-    const parts = [this.baseSystemPrompt(mode, mcpNames, web), this.profile?.textFor(style), getSetting<boolean>(this.db, "ui.richBlocks", true) === false ? "" : RICH_PROMPT].filter(Boolean) as string[];
+  /** Modèles open source : pas de consigne des blocs riches (les petits modèles l'appliquent à tort, ex. un QCM pour une question simple, et elle coûte ~470 tokens par message). */
+  private systemPromptFor(mode: ExperienceMode, mcpNames: string[], style?: string | null, web = false, provider?: string): string | undefined {
+    const rich = getSetting<boolean>(this.db, "ui.richBlocks", true) !== false && provider !== "open";
+    const parts = [this.baseSystemPrompt(mode, mcpNames, web), this.profile?.textFor(style), rich ? RICH_PROMPT : ""].filter(Boolean) as string[];
     return parts.length ? parts.join("\n\n") : undefined;
   }
   /** Recherche web en Chat : opt-in par conversation (le Chat n'a sinon aucun outil). Work et Code ont déjà leurs propres outils. */
@@ -146,7 +148,7 @@ ${f}`; }).join(""); const ctxParts: string[] = [];
     const umid = uid(); const first = !one(this.db, "SELECT 1 x FROM conversation_messages WHERE conversation_id=? AND role='user'", id);
     run(this.db, "INSERT INTO conversation_messages (id,conversation_id,role,content,provider,model,created_at) VALUES (?,?,?,?,?,?,?)", umid, id, "user", shown, next.provider, next.model || null, now());
     if (first && /^Nouvelle conversation$/.test(conv.title)) run(this.db, "UPDATE conversations SET title=? WHERE id=?", text.trim().replace(/\s+/g, " ").slice(0, 60), id);
-    const executionId = this.exec.enqueue({ projectId: conv.mode === "code" ? conv.project_id : null, mode: conv.mode, conversationId: id, cwd, provider: next.provider, model: next.model || undefined, effort: next.effort, prompt, images: imgs, web: conv.mode === "chat" && !!conv.web, extensions: extResolved ? { mcp: extResolved.mcp, skillsText: extResolved.skillsText } : undefined, resumeSessionId: sessionUsable ? conv.provider_session_id : null, systemPrompt: this.systemPromptFor(conv.mode as ExperienceMode, extResolved?.mcp.map((m) => m.name) ?? [], conv.style, conv.mode === "chat" && !!conv.web), priority: 7 });
+    const executionId = this.exec.enqueue({ projectId: conv.mode === "code" ? conv.project_id : null, mode: conv.mode, conversationId: id, cwd, provider: next.provider, model: next.model || undefined, effort: next.effort, prompt, images: imgs, web: conv.mode === "chat" && !!conv.web, extensions: extResolved ? { mcp: extResolved.mcp, skillsText: extResolved.skillsText } : undefined, resumeSessionId: sessionUsable ? conv.provider_session_id : null, systemPrompt: this.systemPromptFor(conv.mode as ExperienceMode, extResolved?.mcp.map((m) => m.name) ?? [], conv.style, conv.mode === "chat" && !!conv.web, next.provider), priority: 7 });
     run(this.db, "UPDATE conversation_messages SET execution_id=? WHERE id=?", executionId, umid); run(this.db, "UPDATE conversations SET updated_at=? WHERE id=?", now(), id);
     return { executionId, newSession, notice };
   }

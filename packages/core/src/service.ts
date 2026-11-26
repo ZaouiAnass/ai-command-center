@@ -6,7 +6,8 @@ import { ExecutionManager, EnqueueInput } from "./execution.js";
 import { ClaudeAdapter } from "./providers/claude.js";
 import { CodexAdapter } from "./providers/codex.js";
 import type { AgentProviderAdapter } from "./providers/common.js";
-import { checkEnv } from "./providers/common.js";
+import { checkEnv, providerName } from "./providers/common.js";
+import { OpenAdapter, OpenEndpoints, FileSecretStore, PRESETS, isLocalUrl, normalizeBaseUrl, ollamaModels, type SecretStore } from "./providers/open.js";
 import { getSetting, setSetting } from "./settings.js";
 import { AGENT_TEMPLATES } from "./templates.js";
 import * as A from "./analytics.js";
@@ -19,24 +20,29 @@ import { Automations } from "./automations.js";
 import { Extensions } from "./extensions.js"; import { Profile } from "./profile.js"; import { Library } from "./library.js"; import { DocConverter } from "./convert.js";
 import { Workflows } from "./workflows.js";
 import { Comparisons } from "./comparison.js";
-import { ProjectMemory, listMcpCached, listSkills, backupTo, inspectBackup, stageRestore, applyPendingRestore } from "./system.js";
+import { ProjectMemory, SUMMARY_PROMPT, listMcpCached, listSkills, backupTo, inspectBackup, stageRestore, applyPendingRestore } from "./system.js";
 import { routerAdvice } from "./router.js";
 import { Orchestrator } from "./orchestrator.js";
 import { TerminalManager } from "./terminal.js";
+import { listDir, readPreview, gitStatusMap, insideProject } from "./files.js";
 import { git, isGitRepo, currentBranch, createWorktree, worktreeChanges, worktreeDiff, mergeWorktree, listWorktrees } from "./git.js";
 import type { ProviderId, ProviderStatus, QuotaStatus } from "./types.js";
 
-export function createCore(opts: { dataDir: string; dbFile?: string; adapters?: Partial<Record<ProviderId, AgentProviderAdapter>>; scheduler?: boolean; onTerminalEvent?: (e: { id: string; data?: string; end?: number; exit?: { code: number | null } }) => void }) {
+export function createCore(opts: { dataDir: string; dbFile?: string; adapters?: Partial<Record<ProviderId, AgentProviderAdapter>>; scheduler?: boolean; onTerminalEvent?: (e: { id: string; data?: string; end?: number; exit?: { code: number | null } }) => void; secrets?: SecretStore; fetchImpl?: typeof fetch }) {
   const dbFile = opts.dbFile ?? join(opts.dataDir, "acc.sqlite"); const restored = dbFile !== ":memory:" ? applyPendingRestore(opts.dataDir, dbFile) : false;
   const db: DB = openDb(dbFile);
   seedPricing(db);
   const bus = new EventBus();
   const claude = new ClaudeAdapter(getSetting<string | undefined>(db, "provider.claude.path", undefined));
   const codex = new CodexAdapter(getSetting<string | undefined>(db, "provider.codex.path", undefined));
-  const adapters = { claude, codex, ...opts.adapters } as Record<ProviderId, AgentProviderAdapter>;
+  // Clés API des points d'accès hébergés : hors de la base (donc hors des sauvegardes), chiffrées par l'application de bureau.
+  const endpoints = new OpenEndpoints(db, opts.secrets ?? new FileSecretStore(join(opts.dataDir, "open-keys.json")));
+  const openAdapter = new OpenAdapter(endpoints, opts.dataDir, opts.fetchImpl);
+  const adapters = { claude, codex, open: openAdapter, ...opts.adapters } as Record<ProviderId, AgentProviderAdapter>;
   const statusCache = new Map<ProviderId, { at: number; s: ProviderStatus }>();
   const providerStatus = async (p: ProviderId, force = false): Promise<ProviderStatus> => {
     const c = statusCache.get(p); if (!force && c && Date.now() - c.at < 60_000) return c.s;
+    if (p === "open") await autodetectOllama(force).catch(() => {});
     const s = await adapters[p].getAuthStatus(); statusCache.set(p, { at: Date.now(), s });
     run(db, "INSERT INTO provider_auth_states VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider) DO UPDATE SET installed=excluded.installed,path=excluded.path,version=excluded.version,authenticated=excluded.authenticated,auth_mode=excluded.auth_mode,account=excluded.account,plan=excluded.plan,warnings=excluded.warnings,blocked_reason=excluded.blocked_reason,checked_at=excluded.checked_at",
       p, s.installed ? 1 : 0, s.path ?? null, s.version ?? null, s.authenticated ? 1 : 0, s.authMode, s.account ?? null, s.plan ?? null, JSON.stringify(s.warnings), s.blockedReason ?? null, s.checkedAt);
@@ -66,6 +72,45 @@ export function createCore(opts: { dataDir: string; dbFile?: string; adapters?: 
   });
   if (opts.scheduler ?? dbFile !== ":memory:") automations.start();
   const terminals = new TerminalManager(db, (p) => providerStatus(p), (e) => opts.onTerminalEvent?.(e));
+  /** Après un changement de points d'accès : statut et catalogue relus immédiatement. */
+  const refreshOpen = () => { statusCache.delete("open"); catalog.invalidate(); };
+  const projectPath = (pid: string) => { const p = one<any>(db, "SELECT path FROM projects WHERE id=?", pid); if (!p) throw new Error("Projet introuvable"); return p.path as string; };
+  /**
+   * Ollama local détecté automatiquement (serveur sur cet ordinateur = gratuit) quand aucun point d'accès ne le vise encore.
+   * Supprimé par l'utilisateur → plus jamais ré-ajouté automatiquement.
+   */
+  let lastDetect = 0;
+  const autodetectOllama = async (force = false) => {
+    if ((!force && Date.now() - lastDetect < 30_000) || getSetting(db, "open.autodetect.dismissed", false) || opts.dbFile === ":memory:" && !opts.fetchImpl) return; lastDetect = Date.now();
+    if (endpoints.all().some((e) => /:\/\/(localhost|127\.0\.0\.1):11434\b/.test(e.baseUrl))) return;
+    // 127.0.0.1 : Ollama n'écoute qu'en IPv4 ; délai généreux (le serveur peut être occupé par un téléchargement de modèle)
+    const isOllama = await (opts.fetchImpl ?? fetch)("http://127.0.0.1:11434/api/version", { signal: AbortSignal.timeout(4000) }).then(async (r) => r.ok && typeof ((await r.json()) as any)?.version === "string").catch(() => false);
+    if (!isOllama) return;
+    endpoints.save({ name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1" }); catalog.invalidate();
+    run(db, "INSERT INTO audit_events (id,type,provider,payload,at) VALUES (?,?,?,?,?)", uid(), "open.endpoint_detected", "open", JSON.stringify({ baseUrl: "http://127.0.0.1:11434/v1" }), now());
+  };
+
+  // ---- Résumé de projet généré par l'IA (exécution en lecture seule), enregistré comme note de mémoire épinglée ----
+  const summaryRuns = new Map<string, { projectId: string; provider: ProviderId }>(); const summaryErrors = new Map<string, string>();
+  bus.on((e) => {
+    const id = e.executionId; if (!id || !summaryRuns.has(id) || !/^execution\.(completed|failed|cancelled|interrupted)$/.test(e.type)) return;
+    const r = summaryRuns.get(id)!; summaryRuns.delete(id);
+    setImmediate(() => {
+      const ex = one<any>(db, "SELECT status,result_text,error FROM agent_executions WHERE id=?", id); let error: string | undefined;
+      if (ex?.status === "completed") { try { memory.setSummary(r.projectId, ex.result_text ?? "", `${providerName(r.provider)}, ${new Date().toLocaleDateString("fr-FR")}`); } catch (err: any) { error = err.message; } }
+      else error = ex?.status === "cancelled" ? "Génération annulée." : ex?.error || "La génération a échoué.";
+      if (error) summaryErrors.set(r.projectId, error); else summaryErrors.delete(r.projectId);
+      bus.emit("memory.summary", { ok: !error, error }, { projectId: r.projectId, executionId: id });
+    });
+  });
+  const summarize = (projectId: string, provider?: ProviderId) => {
+    const p = one<any>(db, "SELECT * FROM projects WHERE id=?", projectId); if (!p) throw new Error("Projet introuvable");
+    if ([...summaryRuns.values()].some((r) => r.projectId === projectId)) throw new Error("Un résumé est déjà en cours de génération pour ce projet.");
+    const prov = (provider ?? p.default_provider ?? "claude") as ProviderId;
+    const id = exec.enqueue({ projectId, mode: "code", provider: prov, permission: "read-only", prompt: SUMMARY_PROMPT, priority: 6 });
+    summaryRuns.set(id, { projectId, provider: prov }); summaryErrors.delete(projectId); bus.emit("memory.summary", { started: true }, { projectId, executionId: id }); return id;
+  };
+  const summaryStatus = (projectId: string) => { const run = [...summaryRuns.entries()].find(([, r]) => r.projectId === projectId); return { running: run ? { executionId: run[0], provider: run[1].provider } : null, error: summaryErrors.get(projectId) ?? null, summary: memory.summary(projectId) ?? null }; };
 
   const insertProject = (p: { name: string; path: string; description?: string; defaultProvider?: string; defaultModel?: string; instructions?: string; permission?: string; maxConcurrency?: number }) => {
     const id = uid(); const git = isGitRepo(p.path);
@@ -91,12 +136,32 @@ export function createCore(opts: { dataDir: string; dbFile?: string; adapters?: 
   };
   return {
     db, bus, exec, recovered, terminals, orchestrator, conversations, works, workflows, comparisons, memory, restored, quality, automations, extensions, converter, profile, library,
+    summary: { generate: summarize, status: summaryStatus },
+    // --- arborescence des projets (lecture seule)
+    files: { list: (pid: string, rel = "") => listDir(projectPath(pid), rel), read: (pid: string, rel: string) => readPreview(projectPath(pid), rel), git: (pid: string) => gitStatusMap(projectPath(pid)), resolve: (pid: string, rel: string) => insideProject(projectPath(pid), rel) },
+    // --- modèles open source (API compatible OpenAI)
+    open: {
+      endpoints: () => endpoints.view(), presets: () => PRESETS,
+      save: (e: { id?: string; name: string; baseUrl: string; apiKey?: string; models?: string[] }) => { const id = endpoints.save(e); refreshOpen(); run(db, "INSERT INTO audit_events (id,type,provider,payload,at) VALUES (?,?,?,?,?)", uid(), "open.endpoint_saved", "open", JSON.stringify({ id, baseUrl: endpoints.get(id)?.baseUrl, local: isLocalUrl(endpoints.get(id)?.baseUrl ?? ""), keyChanged: e.apiKey !== undefined }), now()); return id; },
+      remove: (id: string) => { if (/:\/\/(localhost|127\.0\.0\.1):11434\b/.test(endpoints.get(id)?.baseUrl ?? "")) setSetting(db, "open.autodetect.dismissed", true); endpoints.remove(id); refreshOpen(); },
+      detect: async () => { setSetting(db, "open.autodetect.dismissed", false); await autodetectOllama(true); refreshOpen(); return endpoints.view(); },
+      /** Teste une configuration (non enregistrée, ou enregistrée si `id` seul). La clé saisie n'est jamais conservée par le test. */
+      test: async (e: { id?: string; name?: string; baseUrl?: string; apiKey?: string }) => {
+        const saved = e.id ? endpoints.get(e.id) : undefined; const baseUrl = normalizeBaseUrl(e.baseUrl ?? saved?.baseUrl ?? "");
+        const probe = new OpenAdapter({ key: () => e.apiKey || (saved ? endpoints.key(saved.id) : undefined), allowPaid: () => true, defaultModel: () => "", all: () => [], get: () => undefined } as any, opts.dataDir, opts.fetchImpl);
+        return probe.test({ id: saved?.id ?? "test", name: e.name ?? saved?.name ?? "test", baseUrl });
+      },
+      settings: () => ({ allowPaid: endpoints.allowPaid(), defaultModel: endpoints.defaultModel() }),
+      setAllowPaid: (v: boolean) => { endpoints.setAllowPaid(!!v); refreshOpen(); run(db, "INSERT INTO audit_events (id,type,provider,payload,at) VALUES (?,?,?,?,?)", uid(), "open.allow_paid_changed", "open", JSON.stringify({ value: !!v }), now()); },
+      setDefaultModel: (id: string) => { endpoints.setDefaultModel(id); refreshOpen(); },
+      ollamaModels: () => ollamaModels(undefined, opts.fetchImpl),
+    },
     system: { mcp: (force?: boolean) => listMcpCached(!!force), skills: () => listSkills(), backup: (file: string) => backupTo(db, file), inspectBackup, stageRestore: (file: string) => stageRestore(opts.dataDir, file) },
     router: { advice: (preferred?: ProviderId) => routerAdvice(db, (p) => providerStatus(p), (p) => quotaOf(p), preferred) },
     ai: { catalog: (p: ProviderId, force = false) => catalog.get(p, force), validate: (p: ProviderId, m?: string | null, e?: string | null) => catalog.validate(p, m, e), policy: (m: ExperienceMode, p: ProviderId) => ({ ...policyFor(m), description: describePolicy(m, p) }),
       defaults: () => Object.fromEntries(EXPERIENCE_MODES.map((m) => [m, getSetting<any>(db, "defaults." + m, null)])), setDefault: (m: ExperienceMode, v: unknown) => setSetting(db, "defaults." + m, v) }, disclaimer: DISCLAIMER,
     // --- fournisseurs
-    providerStatus, async allProviders(force = false) { return { claude: await providerStatus("claude", force), codex: await providerStatus("codex", force) }; },
+    providerStatus, async allProviders(force = false) { const [claude, codex, open] = await Promise.all([providerStatus("claude", force), providerStatus("codex", force), providerStatus("open", force)]); return { claude, codex, open }; },
     billing: { exclusive: () => !!getSetting(db, "billing.exclusive", true), setExclusive: (v: boolean) => { setSetting(db, "billing.exclusive", v); run(db, "INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?)", uid(), "billing.exclusive_changed", null, null, null, null, null, JSON.stringify({ value: v }), now()); }, env: () => ({ claude: checkEnv("claude").flagged, codex: checkEnv("codex").flagged }) },
     models: (p: ProviderId) => adapters[p].getSupportedModels(), capabilities: (p: ProviderId) => adapters[p].getCapabilities(),
     quota: (p: ProviderId) => quotaOf(p),

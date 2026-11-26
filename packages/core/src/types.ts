@@ -1,7 +1,9 @@
-export type ProviderId = "claude" | "codex";
+/** `open` : modèles open source servis par une API compatible OpenAI (Ollama, LM Studio, llama.cpp, OpenRouter, Groq…). */
+export type ProviderId = "claude" | "codex" | "open";
 export type ExecStatus = "draft"|"queued"|"preparing"|"running"|"waiting_approval"|"blocked"|"completed"|"failed"|"cancelled"|"interrupted";
 export type TaskStatus = "backlog"|"todo"|"in_progress"|"review"|"done"|"blocked";
-export type AuthMode = "subscription" | "api_key" | "unknown" | "unavailable";
+/** `local` : serveur de modèles sur cet ordinateur ou le réseau local (aucune facturation). */
+export type AuthMode = "subscription" | "local" | "api_key" | "unknown" | "unavailable";
 export type Confidence = "reported" | "calculated" | "estimated" | "unknown";
 export type CapState = "supported"|"unsupported"|"unknown"|"requires_approval"|"requires_billing"|"blocked_by_policy";
 

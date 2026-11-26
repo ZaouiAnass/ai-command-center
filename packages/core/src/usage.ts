@@ -36,7 +36,10 @@ export class UsageNormalizer {
       run(this.db, `INSERT INTO usage_events (id,idem_key,execution_id,provider,model,task_id,agent_id,project_id,input,output,cache_read,cache_write,cache_write_1h,reasoning,total,confidence,source,note,provider_cost_usd,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         id, idem, ctx.executionId, ctx.provider, r.model, ctx.taskId ?? null, ctx.agentId ?? null, ctx.projectId ?? null, delta.input, delta.output, delta.cacheRead, delta.cacheWrite, delta.cacheWrite1h ?? 0, delta.reasoning, delta.total, confidence, `${ctx.provider}:${r.mode}`, note ?? null, r.providerCostUsd ?? null, now());
       const hasTokens = delta.total > 0;
-      const c = hasTokens ? calculateCost(this.db, ctx.provider, r.model, delta) : { usd: 0, status: "calculated" as const, detail: "aucun token imputé" };
+      // Modèles open source : pas de grille tarifaire de référence. Local = 0 $ réel ; hébergé = coût rapporté par le fournisseur s'il le donne (OpenRouter), sinon inconnu.
+      const c = !hasTokens ? { usd: 0, status: "calculated" as const, detail: "aucun token imputé" }
+        : ctx.provider === "open" ? (r.providerCostUsd != null ? { usd: r.providerCostUsd, status: "calculated" as const, detail: r.providerCostUsd === 0 ? "modèle local : gratuit" : "coût réel rapporté par le fournisseur (facturé)" } : { usd: null, status: "price_unavailable" as const, detail: "Prix non rapporté par ce fournisseur hébergé" })
+        : calculateCost(this.db, ctx.provider, r.model, delta);
       run(this.db, "INSERT INTO cost_estimates VALUES (?,?,?,?,?,?,?)", id, (c as any).pricingId ?? null, (c as any).pricingVersion ?? null, c.usd, c.status, c.detail, now());
       return { eventId: id, delta, usd: c.usd, duplicate: false, note, confidence };
     });

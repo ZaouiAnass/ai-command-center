@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom"; import { ArrowUp, Square, Paperclip, ImagePlus, MonitorUp, Globe, ChevronDown, X, Plug, Sparkles } from "lucide-react"; import { api } from "../api";
 import { useData } from "../hooks"; import { StyleSelect } from "./Personalization";
-import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, effortLabel } from "./AIModelConfiguration";
+import { AIModelConfiguration, AIConfig, Mode, PROVIDER_LABEL, PROVIDER_DOT, effortLabel } from "./AIModelConfiguration";
 
 export interface Attach { name: string; content: string; meta?: { kind: "text" | "converted"; tokens: number; chars: number; truncated: boolean; sourceBytes: number; note?: string } }
 export interface Img { name: string; mime: string; data: string }
@@ -56,7 +56,7 @@ function ModelPill({ mode, cfg, onChange, disabled, convId, style, onStyle, web,
   const model = cfg.model ? cat?.models?.find((m: any) => m.id === cfg.model)?.displayName ?? cfg.model : "Modèle par défaut";
   return <div ref={ref} className="relative min-w-0">
     <button type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} onClick={() => { if (!open && ref.current) { const r = ref.current.getBoundingClientRect(); const above = r.top - 16, below = window.innerHeight - r.bottom - 16; const up = above >= below || above > 460; setSide({ up, max: Math.max(260, Math.min(560, up ? above : below)) }); } setOpen(!open); }} className="group flex items-center gap-2 h-9 pl-2.5 pr-2 rounded-xl text-[13px] text-fg2 hover:bg-raised hover:text-fg transition-colors max-w-full disabled:opacity-50">
-      <span className={`w-2 h-2 rounded-full shrink-0 ${cfg.provider === "claude" ? "bg-claude" : "bg-codex"}`} aria-hidden />
+      <span className={`w-2 h-2 rounded-full shrink-0 ${PROVIDER_DOT[cfg.provider]}`} aria-hidden />
       <span className="truncate font-medium text-fg">{PROVIDER_LABEL[cfg.provider]}</span><span className="text-muted hidden sm:inline">·</span><span className="truncate hidden sm:inline">{model}</span>
       {cfg.effort && <span className="hidden md:inline text-muted">· {effortLabel(cfg.effort)}</span>}<ChevronDown size={14} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} /></button>
     {open && <div role="dialog" aria-label="Configuration du modèle" className={`anim-pop absolute left-0 w-[380px] max-w-[88vw] bg-panel border border-line-strong rounded-2xl p-4 z-40 flex flex-col ${side.up ? "bottom-full mb-2" : "top-full mt-2"}`} style={{ boxShadow: "var(--shadow-pop)", maxHeight: side.max }}>
@@ -95,7 +95,7 @@ export function Composer({ value, onChange, onSend, onStop, busy, sending, place
       <ExtChip mode={mode} convId={convId} disabled={busy} />
       {webValue && mode === "chat" && <span className="inline-flex items-center gap-1 h-7 px-2 rounded-full bg-accent-subtle text-accent text-2xs font-medium shrink-0" title="Recherche web activée pour cette conversation"><Globe size={12} />Web</span>}
       {note && <span className="text-2xs text-accent ml-1 hidden md:inline" role="status">{note}</span>}
-      <div className="ml-auto flex items-center gap-1 shrink-0"><QuotaMeter provider={cfg.provider} /><span className="hidden 2xl:inline text-2xs text-muted mr-1"><span className="kbd">Entrée</span> pour envoyer</span>
+      <div className="ml-auto flex items-center gap-1 shrink-0">{cfg.provider !== "open" && <QuotaMeter provider={cfg.provider} />}<span className="hidden 2xl:inline text-2xs text-muted mr-1"><span className="kbd">Entrée</span> pour envoyer</span>
         {busy ? <button type="button" className="h-9 w-9 rounded-full grid place-items-center bg-[var(--danger-subtle)] text-danger hover:bg-[rgba(251,113,133,.25)] transition-colors" aria-label="Arrêter la génération" title="Arrêter" onClick={onStop}><Square size={13} fill="currentColor" /></button>
           : <button type="button" className={`h-9 w-9 rounded-full grid place-items-center transition-all ${can ? "bg-[var(--btn-primary)] text-white hover:bg-[var(--btn-primary-hover)] hover:scale-105 active:scale-95" : "bg-raised text-muted cursor-not-allowed"}`} aria-label="Envoyer" title="Envoyer (Entrée)" disabled={!can} onClick={onSend}><ArrowUp size={18} strokeWidth={2.4} /></button>}</div></div></div>;
 }

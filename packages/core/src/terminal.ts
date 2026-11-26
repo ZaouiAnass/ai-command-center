@@ -1,12 +1,12 @@
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { DB, run, uid, now } from "./db.js";
-import { BILLING_ENV, findExe, execCapture } from "./providers/common.js";
+import { BILLING_ENV, findExe, execCapture, subscriptionBlocked } from "./providers/common.js";
 import { getSetting } from "./settings.js";
 import type { ProviderId, ProviderStatus } from "./types.js";
 
-export type TerminalKind = "claude" | "codex" | "shell";
-export interface TerminalInfo { id: string; kind: TerminalKind; title: string; cwd: string; projectId?: string; pid?: number; cols: number; rows: number; startedAt: string; exited?: { code: number | null; at: string } }
+export type TerminalKind = "claude" | "codex" | "shell" | "ollama";
+export interface TerminalInfo { id: string; kind: TerminalKind; title: string; cwd: string; projectId?: string; pid?: number; cols: number; rows: number; startedAt: string; exited?: { code: number | null; at: string }; model?: string; contextChars?: number }
 const BUF_MAX = 400_000; // octets de scrollback conservés côté processus principal pour ré-attacher l'écran
 
 interface Term { info: TerminalInfo; pty: any; buf: string; total: number }
@@ -31,27 +31,36 @@ export class TerminalManager {
   private terms = new Map<string, Term>();
   constructor(private db: DB, private statusOf: (p: ProviderId) => Promise<ProviderStatus>, private emit: (e: { id: string; data?: string; end?: number; exit?: { code: number | null } }) => void) {}
 
-  async create(o: { kind: TerminalKind; cwd: string; projectId?: string; cols?: number; rows?: number; title?: string }): Promise<TerminalInfo> {
+  /**
+   * `context` (Claude Code uniquement) : contexte du projet (résumé + notes épinglées) passé par l'option officielle `--append-system-prompt`.
+   * `model` (Ollama uniquement) : modèle local lancé par `ollama run`.
+   */
+  async create(o: { kind: TerminalKind; cwd: string; projectId?: string; cols?: number; rows?: number; title?: string; context?: string; model?: string }): Promise<TerminalInfo> {
     if (!existsSync(o.cwd)) throw new Error(`Dossier introuvable : ${o.cwd}`);
     const exclusive = !!getSetting(this.db, "billing.exclusive", true);
-    let file: string, args: string[] = [];
+    let file: string, args: string[] = []; let contextChars: number | undefined;
     if (o.kind === "shell") ({ file, args } = defaultShell());
-    else {
+    else if (o.kind === "ollama") {
+      file = findExe("ollama") ?? ""; if (!file) throw new Error("Ollama n'est pas installé sur cet ordinateur (https://ollama.com/download).");
+      const m = String(o.model ?? "").trim(); if (!/^[\w.:/-]{1,120}$/.test(m)) throw new Error("Choisissez un modèle Ollama (ex. qwen2.5-coder:7b).");
+      args = ["run", m];
+    } else {
       const st = await this.statusOf(o.kind);
       if (!st.installed) throw new Error(`${o.kind === "claude" ? "Claude Code" : "Codex"} n'est pas détecté sur cet ordinateur. Vérifiez son installation.`);
       if (!st.authenticated) throw new Error(`${o.kind === "claude" ? "Claude Code" : "Codex"} : authentification requise (connectez-vous avec le CLI officiel).`);
-      if (exclusive && st.authMode !== "subscription") throw new Error(`Mode abonnement exclusif : terminal bloqué (mode d'authentification « ${st.authMode} » non vérifié comme abonnement). ${st.blockedReason ?? ""}`);
+      if (subscriptionBlocked(st, exclusive)) throw new Error(`Mode abonnement exclusif : terminal bloqué (mode d'authentification « ${st.authMode} » non vérifié comme abonnement). ${st.blockedReason ?? ""}`);
       file = st.path ?? findExe(o.kind) ?? ""; if (!file) throw new Error("Exécutable introuvable");
       // Option officielle de Codex : certaines installations (app de bureau) exigent de ne pas passer par le démon partagé.
       if (o.kind === "codex" && /--no-daemon/.test(execCapture(file, ["--help"]).out)) args = ["--no-daemon"];
+      if (o.kind === "claude" && o.context?.trim()) { args = ["--append-system-prompt", o.context.trim()]; contextChars = o.context.trim().length; }
     }
     const cols = Math.max(20, o.cols ?? 100), rows = Math.max(5, o.rows ?? 30);
     const pty = loadPty().spawn(file, args, { name: "xterm-256color", cols, rows, cwd: o.cwd, env: terminalEnv(exclusive) as any });
-    const info: TerminalInfo = { id: uid(), kind: o.kind, title: o.title ?? (o.kind === "claude" ? "Claude Code" : o.kind === "codex" ? "Codex" : "Shell"), cwd: o.cwd, projectId: o.projectId, pid: pty.pid, cols, rows, startedAt: now() };
+    const info: TerminalInfo = { id: uid(), kind: o.kind, title: o.title ?? (o.kind === "claude" ? "Claude Code" : o.kind === "codex" ? "Codex" : o.kind === "ollama" ? `Ollama · ${o.model}` : "Shell"), cwd: o.cwd, projectId: o.projectId, pid: pty.pid, cols, rows, startedAt: now(), model: o.kind === "ollama" ? o.model : undefined, contextChars };
     const t: Term = { info, pty, buf: "", total: 0 }; this.terms.set(info.id, t);
     pty.onData((d: string) => { t.buf += d; t.total += d.length; if (t.buf.length > BUF_MAX) t.buf = t.buf.slice(-BUF_MAX); this.emit({ id: info.id, data: d, end: t.total }); });
     pty.onExit((e: { exitCode: number }) => { info.exited = { code: e.exitCode ?? null, at: now() }; this.emit({ id: info.id, exit: { code: info.exited.code } }); });
-    run(this.db, "INSERT INTO audit_events (id,type,provider,project_id,payload,at) VALUES (?,?,?,?,?,?)", uid(), "terminal.created", o.kind === "shell" ? null : o.kind, o.projectId ?? null, JSON.stringify({ kind: o.kind, cwd: o.cwd, exclusive }), now());
+    run(this.db, "INSERT INTO audit_events (id,type,provider,project_id,payload,at) VALUES (?,?,?,?,?,?)", uid(), "terminal.created", o.kind === "shell" ? null : o.kind === "ollama" ? "open" : o.kind, o.projectId ?? null, JSON.stringify({ kind: o.kind, cwd: o.cwd, exclusive, model: info.model, contextChars }), now());
     return info;
   }
   list(): TerminalInfo[] { return [...this.terms.values()].map((t) => { t.info.pid = t.pty.pid || t.info.pid; return t.info; }); }

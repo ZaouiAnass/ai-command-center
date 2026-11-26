@@ -27,7 +27,7 @@ export function NewConversationComposer({ mode, projectId, title, subtitle, sugg
         onImage={async () => { try { const f = await api("dialog.images"); if (f?.length) setImgs([...imgs, ...f].slice(0, 4)); } catch (e: any) { toast(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error"); } }}
         onRemoveAttach={(i) => setAttach(attach.filter((_, j) => j !== i))} onRemoveImage={(i) => setImgs(imgs.filter((_, j) => j !== i))} />
       {suggestions && <div className="grid grid-cols-2 gap-2 mt-5">{SUGGESTIONS.map(([I, l, p]) => <button key={l} className="card lift p-3 text-left flex items-center gap-3 cursor-pointer" onClick={() => { setText(p); ta.current?.focus(); }}><I size={16} className="text-muted shrink-0" /><span className="text-[13px]">{l}</span></button>)}</div>}
-      {mode === "chat" && <p className="text-xs text-muted text-center mt-6">Chat simple : aucune commande, aucun fichier, aucun projet requis. Moteur {PROVIDER_LABEL[cfg.provider]} en conversation seule (ce n'est pas le Chat natif {cfg.provider === "claude" ? "claude.ai" : "ChatGPT"}).</p>}</div></div>;
+      {mode === "chat" && <p className="text-xs text-muted text-center mt-6">Chat simple : aucune commande, aucun fichier, aucun projet requis. {cfg.provider === "open" ? "Modèle open source via votre point d'accès (local ou hébergé)." : <>Moteur {PROVIDER_LABEL[cfg.provider]} en conversation seule (ce n'est pas le Chat natif {cfg.provider === "claude" ? "claude.ai" : "ChatGPT"}).</>}</p>}</div></div>;
 }
 
 export default function Chat() {

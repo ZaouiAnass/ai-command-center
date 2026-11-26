@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useId } from "react";
 import { CheckCircle2, CircleDashed, Clock, XCircle, Loader2, ShieldAlert, PauseCircle, Ban, AlertTriangle, Inbox, RefreshCw, X } from "lucide-react";
 import { useT } from "./i18n";
 
-type Tone = "success" | "warning" | "danger" | "info" | "accent" | "neutral" | "claude" | "codex";
+type Tone = "success" | "warning" | "danger" | "info" | "accent" | "neutral" | "claude" | "codex" | "open";
 const TONE: Record<Tone, string> = {
   success: "bg-[var(--success-subtle)] text-success", warning: "bg-[var(--warning-subtle)] text-warning", danger: "bg-[var(--danger-subtle)] text-danger",
-  info: "bg-[var(--info-subtle)] text-info", accent: "bg-accent-subtle text-accent", neutral: "bg-raised text-fg2", claude: "bg-[rgba(245,158,107,.12)] text-claude", codex: "bg-[rgba(103,193,245,.12)] text-codex",
+  info: "bg-[var(--info-subtle)] text-info", accent: "bg-accent-subtle text-accent", neutral: "bg-raised text-fg2", claude: "bg-[rgba(245,158,107,.12)] text-claude", codex: "bg-[rgba(103,193,245,.12)] text-codex", open: "bg-[rgba(134,199,120,.14)] text-open",
 };
 const STATUS: Record<string, { tone: Tone; icon: any; spin?: boolean }> = {
   running: { tone: "success", icon: Loader2, spin: true }, preparing: { tone: "info", icon: Loader2, spin: true }, queued: { tone: "neutral", icon: Clock }, completed: { tone: "success", icon: CheckCircle2 },
@@ -13,7 +13,7 @@ const STATUS: Record<string, { tone: Tone; icon: any; spin?: boolean }> = {
   blocked: { tone: "danger", icon: Ban }, draft: { tone: "neutral", icon: CircleDashed }, idle: { tone: "neutral", icon: CircleDashed }, working: { tone: "success", icon: Loader2, spin: true },
   waiting: { tone: "warning", icon: ShieldAlert }, offline: { tone: "neutral", icon: Ban },
 };
-const AUTH: Record<string, Tone> = { subscription: "success", api_key: "danger", unknown: "warning", unavailable: "neutral" };
+const AUTH: Record<string, Tone> = { subscription: "success", local: "success", api_key: "danger", unknown: "warning", unavailable: "neutral" };
 const CONF: Record<string, Tone> = { reported: "success", calculated: "info", estimated: "warning", unknown: "warning" };
 
 /** Pastille de statut : icône + libellé (jamais la couleur seule). */
@@ -24,9 +24,9 @@ export function StatusIndicator({ status, label, size = "md" }: { status: string
 export function Badge({ v, text }: { v: string; text?: string }) {
   const t = useT();
   if (STATUS[v]) return <StatusIndicator status={v} label={text} />;
-  const tone: Tone = v === "claude" ? "claude" : v === "codex" ? "codex" : AUTH[v] ?? CONF[v] ?? "neutral";
-  const label = text ?? (v === "claude" ? "Claude" : v === "codex" ? "Codex" : t("auth." + v) !== "auth." + v ? t("auth." + v) : v);
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${TONE[tone]}`}>{(v === "claude" || v === "codex") && <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden />}{label}</span>;
+  const tone: Tone = v === "claude" ? "claude" : v === "codex" ? "codex" : v === "open" ? "open" : AUTH[v] ?? CONF[v] ?? "neutral";
+  const label = text ?? (v === "claude" ? "Claude" : v === "codex" ? "Codex" : v === "open" ? "Open source" : t("auth." + v) !== "auth." + v ? t("auth." + v) : v);
+  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${TONE[tone]}`}>{(v === "claude" || v === "codex" || v === "open") && <span className="w-1.5 h-1.5 rounded-full bg-current" aria-hidden />}{label}</span>;
 }
 export const ProviderMark = ({ p }: { p: string }) => <Badge v={p} />;
 

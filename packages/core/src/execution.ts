@@ -2,6 +2,7 @@ import { DB, all, one, run, uid, now, tx } from "./db.js";
 import { EventBus } from "./events.js";
 import { UsageNormalizer } from "./usage.js";
 import type { AgentProviderAdapter, RunSink } from "./providers/common.js";
+import { subscriptionBlocked } from "./providers/common.js";
 import type { ExecEvent, ExecStatus, ProviderId, RunHandle, ProviderStatus, RunRequest } from "./types.js";
 import { createWorktree } from "./git.js";
 import { getSetting } from "./settings.js";
@@ -96,9 +97,9 @@ export class ExecutionManager {
     try {
       const exclusive = !!getSetting(this.db, "billing.exclusive", true);
       const st = await this.statusOf(ex.provider);
-      if (!st.installed) return fail(`${ex.provider} n'est pas installé`);
-      if (!st.authenticated) { this.bus.emit("provider.auth_required", {}, { provider: ex.provider }); return fail(`${ex.provider} : authentification requise`); }
-      if (exclusive && st.authMode !== "subscription") return fail(`Mode abonnement exclusif : exécution bloquée (mode d'authentification « ${st.authMode} » non vérifié comme abonnement). ${st.blockedReason ?? ""}`);
+      if (!st.installed) return fail(ex.provider === "open" ? "Modèles open source : aucun point d'accès configuré (Paramètres › Modèles open source)." : `${ex.provider} n'est pas installé`);
+      if (!st.authenticated) { if (ex.provider === "open") return fail(`Modèles open source : ${st.blockedReason ?? "aucun point d'accès joignable"}`); this.bus.emit("provider.auth_required", {}, { provider: ex.provider }); return fail(`${ex.provider} : authentification requise`); }
+      if (subscriptionBlocked(st, exclusive)) return fail(`Mode abonnement exclusif : exécution bloquée (mode d'authentification « ${st.authMode} » non vérifié comme abonnement). ${st.blockedReason ?? ""}`);
       if (live.cancelRequested) return;
       let cwd = ex.cwd as string;
       if (ex.worktree_id === "pending" && proj) {

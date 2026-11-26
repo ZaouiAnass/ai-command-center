@@ -19,13 +19,43 @@ export class ProjectMemory {
     if (p.pinned !== undefined) run(this.db, "UPDATE project_memory SET pinned=? WHERE id=?", p.pinned ? 1 : 0, id); run(this.db, "UPDATE project_memory SET updated_at=? WHERE id=?", now(), id);
   }
   remove(id: string) { run(this.db, "DELETE FROM project_memory WHERE id=?", id); }
-  /** Contexte injecté : seules les notes épinglées, bornées en taille (pas toute la mémoire à chaque session). */
+  summary(projectId: string) { return one<any>(this.db, "SELECT * FROM project_memory WHERE project_id=? AND kind='summary' ORDER BY updated_at DESC LIMIT 1", projectId); }
+  /** Remplace le résumé généré du projet (une seule note de type « summary », épinglée, modifiable ensuite comme les autres). */
+  setSummary(projectId: string, content: string, source: string): string {
+    const text = cleanSummary(content); if (text.length < 40) throw new Error("Résumé vide ou trop court : rien n'a été enregistré.");
+    const cur = this.summary(projectId);
+    if (cur) { run(this.db, "UPDATE project_memory SET content=?, title=?, pinned=1, updated_at=? WHERE id=?", text.slice(0, SUMMARY_MAX), `Résumé du projet (${source})`, now(), cur.id); return cur.id; }
+    const id = uid(); run(this.db, "INSERT INTO project_memory VALUES (?,?,?,?,?,?,?,?)", id, projectId, `Résumé du projet (${source})`, text.slice(0, SUMMARY_MAX), "summary", 1, now(), now()); return id;
+  }
+  /**
+   * Contexte injecté : le résumé du projet (s'il est épinglé) en premier avec son propre budget, puis les notes épinglées, bornées en taille.
+   * Le résumé garde sa mise en forme (sections) ; les notes sont aplaties sur une ligne.
+   */
   context(projectId: string, max = 3000): { text: string; included: { id: string; title: string }[] } {
-    let text = ""; const included: { id: string; title: string }[] = [];
-    for (const m of all<any>(this.db, "SELECT * FROM project_memory WHERE project_id=? AND pinned=1 ORDER BY updated_at DESC", projectId)) { const block = `- ${m.title} : ${String(m.content).replace(/\s+/g, " ")}\n`; if ((text + block).length > max) break; text += block; included.push({ id: m.id, title: m.title }); }
-    return { text: text ? `[Mémoire du projet — conventions et décisions]\n${text}` : "", included };
+    let text = ""; const included: { id: string; title: string }[] = []; let head = "";
+    const s = this.summary(projectId); if (s?.pinned) { head = `[Résumé du projet]\n${String(s.content).slice(0, SUMMARY_MAX)}\n\n`; included.push({ id: s.id, title: s.title }); }
+    for (const m of all<any>(this.db, "SELECT * FROM project_memory WHERE project_id=? AND pinned=1 AND kind<>'summary' ORDER BY updated_at DESC", projectId)) { const block = `- ${m.title} : ${String(m.content).replace(/\s+/g, " ")}\n`; if ((text + block).length > max) break; text += block; included.push({ id: m.id, title: m.title }); }
+    return { text: head + (text ? `[Mémoire du projet — conventions et décisions]\n${text}` : ""), included };
   }
 }
+export const SUMMARY_MAX = 3500;
+/** Retire un éventuel préambule (« Voici le résumé… ») et une clôture de bloc de code englobante. */
+export function cleanSummary(s: string): string {
+  let t = String(s ?? "").trim(); const fenced = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/.exec(t); if (fenced) t = fenced[1]!.trim();
+  const firstHeading = t.search(/^(#{1,3} |\*\*[^*\n]+\*\*)/m); if (firstHeading > 0 && firstHeading < 200) t = t.slice(firstHeading);
+  return t.trim();
+}
+export const SUMMARY_PROMPT = [
+  "Analyse ce projet en lecture seule : arborescence, README, fichiers de configuration et de dépendances, points d'entrée, scripts, quelques fichiers clés. Ne modifie aucun fichier et ne lance aucune commande qui écrit.",
+  "Rédige ensuite un RÉSUMÉ DE CONTEXTE destiné à un assistant de programmation qui reprendra ce projet sans le connaître. Markdown concis, 3 000 caractères maximum, avec exactement ces sections :",
+  "## Objectif — ce que fait le projet, en 2 phrases.",
+  "## Stack — langages, frameworks, versions notables, gestionnaire de paquets.",
+  "## Structure — dossiers et fichiers clés, et leur rôle.",
+  "## Commandes — installer, lancer, tester, construire (commandes exactes trouvées dans le projet).",
+  "## Conventions — style, nommage, patterns récurrents, règles visibles dans le code.",
+  "## Points d'attention — pièges, zones sensibles, dette, éléments inachevés.",
+  "Réponds uniquement avec le résumé, sans introduction ni conclusion. N'invente rien : si une information est absente, écris « non trouvé ».",
+].join("\n");
 
 // ---------------- MCP & Skills (lecture seule via les commandes officielles) ----------------
 export interface McpServer { provider: "claude" | "codex"; name: string; transport: string; target: string; status: string; enabled?: boolean; envKeys: string[] }

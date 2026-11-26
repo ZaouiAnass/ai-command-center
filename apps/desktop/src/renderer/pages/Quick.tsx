@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Loader2, Asterisk } from "lucide-react";
-import { api } from "../api"; import { useDefaultConfig, PROVIDER_LABEL, type ProviderId } from "../components/AIModelConfiguration";
+import { api } from "../api"; import { useDefaultConfig, PROVIDER_LABEL, PROVIDER_DOT, type ProviderId } from "../components/AIModelConfiguration";
 
 /**
  * Lanceur rapide (raccourci global) : une question, Entrée, et la conversation s'ouvre dans la fenêtre principale.
@@ -22,7 +22,7 @@ export default function Quick() {
       <div className="flex items-start gap-3 px-4 pt-4 pb-2"><Asterisk size={22} strokeWidth={2.5} className="text-accent mt-1 shrink-0" aria-hidden />
         <textarea ref={ta} autoFocus rows={1} className="flex-1 bg-transparent outline-none resize-none text-[16px] leading-7 placeholder:text-muted select-text" placeholder="Posez une question…" aria-label="Votre question" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void go(); } }} /></div>
       {err && <p role="alert" className="px-4 pb-1 text-xs text-danger">{err}</p>}
-      <div className="flex items-center gap-2 px-3 pb-3 pt-1"><button type="button" className="chip" onClick={() => setCfg({ provider: other, model: null, effort: null })} title="Changer de fournisseur"><span className={`w-2 h-2 rounded-full ${cfg.provider === "claude" ? "bg-claude" : "bg-codex"}`} />{PROVIDER_LABEL[cfg.provider]}</button>
+      <div className="flex items-center gap-2 px-3 pb-3 pt-1"><button type="button" className="chip" onClick={() => setCfg({ provider: other, model: null, effort: null })} title="Changer de fournisseur"><span className={`w-2 h-2 rounded-full ${PROVIDER_DOT[cfg.provider]}`} />{PROVIDER_LABEL[cfg.provider]}</button>
         <span className="text-2xs text-muted"><span className="kbd">Entrée</span> envoyer · <span className="kbd">Échap</span> fermer</span>
         <button type="button" aria-label="Envoyer" disabled={!text.trim() || busy || !ready} onClick={() => void go()} className="ml-auto h-9 w-9 rounded-full grid place-items-center bg-[var(--btn-primary)] text-white disabled:bg-raised disabled:text-muted disabled:cursor-not-allowed hover:bg-[var(--btn-primary-hover)] transition-colors">{busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={18} strokeWidth={2.4} />}</button></div>
     </div></div>;

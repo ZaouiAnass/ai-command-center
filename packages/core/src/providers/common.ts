@@ -8,7 +8,14 @@ import type { ProviderEnvCheck, ProviderId, ProviderStatus, ExecEvent, RunReques
 export const BILLING_ENV: Record<ProviderId, string[]> = {
   claude: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_BASE_URL"],
   codex: ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"],
+  open: [], // clés gérées explicitement par point d'accès, jamais lues dans l'environnement
 };
+/**
+ * Garde-fou « abonnement exclusif » : il protège Claude Code et Codex d'une bascule silencieuse vers la facturation API.
+ * Les modèles open source ont leur propre garde-fou (points d'accès hébergés refusés sans autorisation explicite, voir providers/open.ts).
+ */
+export function subscriptionBlocked(st: ProviderStatus, exclusive: boolean): boolean { return exclusive && st.provider !== "open" && st.authMode !== "subscription"; }
+export const providerName = (p: ProviderId) => (p === "claude" ? "Claude Code" : p === "codex" ? "Codex" : "Modèles open source");
 export function checkEnv(provider: ProviderId, env = process.env): ProviderEnvCheck {
   const flagged = BILLING_ENV[provider].filter((k) => env[k]);
   return { ok: flagged.length === 0, stripped: flagged, flagged };
@@ -25,13 +32,14 @@ export function execCapture(cmd: string, args: string[], timeoutMs = 15000): { o
   const r = spawnSync(cmd, args, { encoding: "utf8", timeout: timeoutMs, windowsHide: true, shell: false });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
 }
-export function findExe(provider: ProviderId, override?: string): string | undefined {
+export function findExe(provider: ProviderId | "ollama", override?: string): string | undefined {
   if (override && existsSync(override)) return override;
-  const name = provider === "claude" ? "claude" : "codex";
+  const name = provider === "claude" ? "claude" : provider === "ollama" ? "ollama" : "codex";
   const w = spawnSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8", windowsHide: true });
   if (w.status === 0) { const first = w.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).find((p) => !/\.(cmd|ps1)$/i.test(p)) ?? w.stdout.split(/\r?\n/)[0]; if (first) return first.trim(); }
   const cands: string[] = [];
   if (provider === "claude") cands.push(join(homedir(), ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude"));
+  if (provider === "ollama") cands.push(join(process.env.LOCALAPPDATA ?? "", "Programs", "Ollama", "ollama.exe"), "/usr/local/bin/ollama");
   if (provider === "codex") {
     const base = join(process.env.LOCALAPPDATA ?? "", "OpenAI", "Codex", "bin");
     if (existsSync(base)) {

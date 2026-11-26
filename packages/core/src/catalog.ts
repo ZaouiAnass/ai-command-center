@@ -1,6 +1,7 @@
 import { DB, all } from "./db.js";
 import { getSetting } from "./settings.js";
 import type { AgentProviderAdapter } from "./providers/common.js";
+import { subscriptionBlocked, providerName } from "./providers/common.js";
 import type { EffortOption, ModelInfo, ProviderId, ProviderStatus } from "./types.js";
 
 export interface ProviderCatalog {
@@ -21,9 +22,9 @@ export class AICatalog {
     const hit = this.cache.get(provider); if (!force && hit && Date.now() - hit.at < 5 * 60_000) return hit.c;
     const st = await this.statusOf(provider); const exclusive = !!getSetting(this.db, "billing.exclusive", true);
     const base: ProviderCatalog = { provider, available: true, authMode: st.authMode, models: [], fetchedAt: new Date().toISOString(), notes: [] };
-    if (!st.installed) { base.available = false; base.reason = `${provider === "claude" ? "Claude Code" : "Codex"} n'est pas détecté sur cet ordinateur. Vérifiez son installation.`; }
-    else if (!st.authenticated) { base.available = false; base.reason = "Authentification requise : connectez-vous avec le CLI officiel."; }
-    else if (exclusive && st.authMode !== "subscription") { base.available = false; base.reason = `Mode abonnement exclusif : authentification « ${st.authMode} » non vérifiée comme abonnement.`; }
+    if (!st.installed) { base.available = false; base.reason = provider === "open" ? "Aucun point d'accès configuré : ajoutez Ollama, LM Studio ou un service hébergé dans Paramètres › Modèles open source." : `${providerName(provider)} n'est pas détecté sur cet ordinateur. Vérifiez son installation.`; }
+    else if (!st.authenticated) { base.available = false; base.reason = provider === "open" ? (st.blockedReason ?? "Aucun point d'accès joignable : le serveur de modèles est-il démarré ?") : "Authentification requise : connectez-vous avec le CLI officiel."; }
+    else if (subscriptionBlocked(st, exclusive)) { base.available = false; base.reason = `Mode abonnement exclusif : authentification « ${st.authMode} » non vérifiée comme abonnement.`; }
     if (base.available) {
       let models = await this.adapters[provider].getSupportedModels().catch(() => [] as ModelInfo[]);
       if (provider === "claude") {
@@ -31,6 +32,7 @@ export class AICatalog {
         for (const r of all<{ model: string }>(this.db, "SELECT DISTINCT model FROM usage_events WHERE provider='claude' AND model IS NOT NULL")) if (r.model && !known.has(r.model)) models.push({ id: r.model, displayName: r.model, source: "observed", efforts: eff, description: "Modèle déjà utilisé avec votre compte (observé)." });
         base.notes.push("Claude Code n'expose pas la liste des modèles de votre compte : alias officiels du CLI et modèles déjà observés. Un niveau d'effort refusé par un modèle est signalé par le CLI.");
       }
+      if (provider === "open") { base.notes.push("Modèles listés par vos points d'accès. Local = gratuit ; hébergé = facturé à l'usage par ce fournisseur. Outils fichiers (lecture/écriture dans le dossier de travail) en Work et Code, sans commandes système."); for (const w of st.warnings) base.notes.push(w); }
       if (!models.length) base.notes.push("Aucun modèle n'a pu être lu auprès du fournisseur : le modèle par défaut du CLI sera utilisé.");
       base.models = models; base.defaultEfforts = (models.find((m) => m.isDefault) ?? models[0])?.efforts;
     }

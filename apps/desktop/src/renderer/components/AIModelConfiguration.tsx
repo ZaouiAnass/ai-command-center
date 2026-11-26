@@ -2,15 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Info, ShieldCheck, ShieldAlert, ChevronDown, Check, Gauge } from "lucide-react";
 import { useData } from "../hooks";
 
-export type ProviderId = "claude" | "codex";
+export type ProviderId = "claude" | "codex" | "open";
+export const PROVIDERS: ProviderId[] = ["claude", "codex", "open"];
+/** Pastille de couleur du fournisseur. */
+export const PROVIDER_DOT: Record<ProviderId, string> = { claude: "bg-claude", codex: "bg-codex", open: "bg-open" };
 export interface AIConfig { provider: ProviderId; model: string | null; effort: string | null }
 export type Mode = "chat" | "work" | "code";
 interface EffortOption { value: string; description?: string }
 interface ModelInfo { id: string; displayName: string; isDefault?: boolean; description?: string; efforts?: EffortOption[]; defaultEffort?: string; capabilities?: string[]; source?: string }
 interface Catalog { provider: ProviderId; available: boolean; reason?: string; models: ModelInfo[]; defaultEfforts?: EffortOption[]; notes: string[] }
 
-export const PROVIDER_LABEL: Record<ProviderId, string> = { claude: "Claude Code", codex: "Codex" };
-const FAMILY: Record<ProviderId, string> = { claude: "Anthropic", codex: "OpenAI" };
+export const PROVIDER_LABEL: Record<ProviderId, string> = { claude: "Claude Code", codex: "Codex", open: "Open source" };
+const FAMILY: Record<ProviderId, string> = { claude: "Anthropic", codex: "OpenAI", open: "Ollama, LM Studio, OpenRouter…" };
 // Descriptions indicatives (jamais présentées comme un réglage du fournisseur).
 const INDICATIVE: Record<string, string> = { none: "Aucun raisonnement", minimal: "Très rapide", low: "Rapide", medium: "Équilibré", high: "Approfondi", xhigh: "Intensif", max: "Intensif+", ultra: "Intensif avec délégation" };
 export const effortLabel = (v?: string | null) => (v ? v.charAt(0).toUpperCase() + v.slice(1) : "Automatique");
@@ -48,15 +51,15 @@ function PolicyPanel({ mode, provider }: { mode: Mode; provider: ProviderId }) {
  * Les options viennent du catalogue des interfaces officielles ; une valeur non exposée n'est jamais proposée.
  */
 export function AIModelConfiguration({ mode, value, onChange, variant = "form", showEffort = true, showPolicy = true, lockProvider, disabled }: { mode: Mode; value: AIConfig; onChange: (v: AIConfig) => void; variant?: "form" | "inline"; showEffort?: boolean; showPolicy?: boolean; lockProvider?: boolean; disabled?: boolean }) {
-  const { data: cl } = useData<Catalog>("ai.catalog", ["claude"], { every: 120000 }); const { data: cx } = useData<Catalog>("ai.catalog", ["codex"], { every: 120000 });
-  const cats: Record<ProviderId, Catalog | undefined> = { claude: cl, codex: cx }; const cat = cats[value.provider]; const [note, setNote] = useState<string>();
+  const { data: cl } = useData<Catalog>("ai.catalog", ["claude"], { every: 120000 }); const { data: cx } = useData<Catalog>("ai.catalog", ["codex"], { every: 120000 }); const { data: op } = useData<Catalog>("ai.catalog", ["open"], { every: 120000 });
+  const cats: Record<ProviderId, Catalog | undefined> = { claude: cl, codex: cx, open: op }; const cat = cats[value.provider]; const [note, setNote] = useState<string>();
   const models = cat?.models ?? []; const efforts = useMemo(() => effortsFor(cat, value.model), [cat, value.model]);
   useEffect(() => { // une valeur devenue invalide (modèle retiré, effort non pris en charge) est retirée visiblement, jamais envoyée
     if (!cat?.available) return; if (value.model && !models.some((m) => m.id === value.model)) { setNote(`Le modèle « ${value.model} » n'est plus disponible : modèle par défaut utilisé.`); onChange({ ...value, model: null, effort: null }); return; }
     if (value.effort && !efforts?.some((e) => e.value === value.effort)) { setNote("Effort réinitialisé : non pris en charge par ce modèle."); onChange({ ...value, effort: null }); } }, [cat, value.model, value.effort]);
   const setProvider = (p: ProviderId) => { setNote(undefined); onChange({ provider: p, model: null, effort: null }); };
   const setModel = (m: string) => { setNote(undefined); const nm = m || null; const nef = effortsFor(cat, nm); onChange({ ...value, model: nm, effort: value.effort && nef?.some((e) => e.value === value.effort) ? value.effort : null }); };
-  const provOpts = (["claude", "codex"] as ProviderId[]).map((p) => { const c = cats[p]; return <option key={p} value={p} disabled={!!c && !c.available}>{PROVIDER_LABEL[p]} ({FAMILY[p]}){c && !c.available ? " — indisponible" : ""}</option>; });
+  const provOpts = PROVIDERS.map((p) => { const c = cats[p]; return <option key={p} value={p} disabled={!!c && !c.available}>{PROVIDER_LABEL[p]} ({FAMILY[p]}){c && !c.available ? " — indisponible" : ""}</option>; });
   const modelOpts = [<option key="" value="">Défaut du fournisseur</option>, ...models.filter((m) => m.id).map((m) => <option key={m.id} value={m.id}>{m.displayName}{m.source === "cli-alias" ? " (alias)" : m.source === "observed" ? " (déjà utilisé)" : ""}</option>)];
   const cur = models.find((m) => m.id === (value.model ?? ""));
 
@@ -66,13 +69,13 @@ export function AIModelConfiguration({ mode, value, onChange, variant = "form", 
     {showEffort && <ReasoningEffortSelector compact efforts={efforts} value={value.effort} disabled={disabled || !cat?.available} onChange={(e) => onChange({ ...value, effort: e })} />}
     {cat && !cat.available && <span className="text-xs text-warning" role="alert" title={cat.reason}>{PROVIDER_LABEL[value.provider]} indisponible</span>}{note && <span className="text-xs text-warning">{note}</span>}</div>;
 
-  const rows: ModelInfo[] = [{ id: "", displayName: "Défaut du fournisseur", description: "Le fournisseur choisit le modèle recommandé pour votre abonnement." }, ...models.filter((m) => m.id)];
+  const rows: ModelInfo[] = [{ id: "", displayName: "Défaut du fournisseur", description: value.provider === "open" ? `Modèle par défaut : ${models.find((m) => m.isDefault)?.displayName ?? "aucun"} (réglable dans Paramètres › Modèles open source).` : "Le fournisseur choisit le modèle recommandé pour votre abonnement." }, ...models.filter((m) => m.id)];
   return <div>
     <div className="label">Fournisseur</div>
-    <div role="radiogroup" aria-label="Fournisseur" className="grid grid-cols-2 gap-2 mb-1">{(["claude", "codex"] as ProviderId[]).map((p) => { const c = cats[p]; const on = value.provider === p; const off = !!c && !c.available;
+    <div role="radiogroup" aria-label="Fournisseur" className="grid grid-cols-3 gap-2 mb-1">{PROVIDERS.map((p) => { const c = cats[p]; const on = value.provider === p; const off = !!c && !c.available;
       return <button key={p} type="button" role="radio" aria-checked={on} disabled={disabled || off || (lockProvider && !on)} onClick={() => setProvider(p)} title={off ? c?.reason : undefined} className={`text-left p-3 rounded-xl border transition-colors ${on ? "border-accent bg-accent-subtle" : "border-line bg-bg hover:border-line-strong"} disabled:opacity-45 disabled:cursor-not-allowed`}>
-        <div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full shrink-0 ${p === "claude" ? "bg-claude" : "bg-codex"}`} aria-hidden /><span className="font-medium text-[13px]">{PROVIDER_LABEL[p]}</span>{on && <Check size={14} className="ml-auto text-accent" aria-hidden />}</div>
-        <div className="text-2xs text-muted mt-0.5">{FAMILY[p]}{off ? " · indisponible" : ""}</div></button>; })}</div>
+        <div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full shrink-0 ${PROVIDER_DOT[p]}`} aria-hidden /><span className="font-medium text-[13px]">{PROVIDER_LABEL[p]}</span>{on && <Check size={14} className="ml-auto text-accent" aria-hidden />}</div>
+        <div className="text-2xs text-muted mt-0.5 truncate">{FAMILY[p]}{off ? " · indisponible" : ""}</div></button>; })}</div>
     {cat && !cat.available && <p role="alert" className="text-xs text-warning mt-1.5 flex gap-1.5"><Info size={13} className="mt-0.5 shrink-0" />{cat.reason}</p>}
     <div className="label mt-4">Modèle</div>
     <div role="radiogroup" aria-label="Modèle" className="rounded-xl border border-line bg-bg max-h-[230px] overflow-auto p-1">{!cat ? <p className="text-muted text-xs p-3">Chargement des modèles…</p> : rows.map((m) => { const on = (value.model ?? "") === m.id; return <button key={m.id || "default"} type="button" role="radio" aria-checked={on} disabled={disabled || !cat.available} onClick={() => setModel(m.id)} className={`w-full text-left flex items-start gap-2.5 px-2.5 py-2 rounded-lg transition-colors disabled:opacity-50 ${on ? "bg-accent-subtle" : "hover:bg-raised"}`}>
@@ -85,9 +88,9 @@ export function AIModelConfiguration({ mode, value, onChange, variant = "form", 
 
 /** Configuration initiale : défaut du mode si valide, sinon premier fournisseur disponible. */
 export function useDefaultConfig(mode: Mode): [AIConfig, (c: AIConfig) => void, boolean] {
-  const { data: defs } = useData<any>("ai.defaults", []); const { data: cl } = useData<Catalog>("ai.catalog", ["claude"]); const { data: cx } = useData<Catalog>("ai.catalog", ["codex"]);
+  const { data: defs } = useData<any>("ai.defaults", []); const { data: cl } = useData<Catalog>("ai.catalog", ["claude"]); const { data: cx } = useData<Catalog>("ai.catalog", ["codex"]); const { data: op } = useData<Catalog>("ai.catalog", ["open"]);
   const [cfg, setCfg] = useState<AIConfig>({ provider: "claude", model: null, effort: null }); const [ready, setReady] = useState(false);
-  useEffect(() => { if (ready || !defs || !cl || !cx) return; const d = defs[mode]; const ok = (p: ProviderId) => (p === "claude" ? cl : cx).available;
-    const prov: ProviderId = d?.provider && ok(d.provider) ? d.provider : ok("claude") ? "claude" : "codex"; setCfg(d?.provider === prov ? { provider: prov, model: d.model ?? null, effort: d.effort ?? null } : { provider: prov, model: null, effort: null }); setReady(true); }, [defs, cl, cx, ready]);
+  useEffect(() => { if (ready || !defs || !cl || !cx || !op) return; const d = defs[mode]; const ok = (p: ProviderId) => !!({ claude: cl, codex: cx, open: op }[p]?.available);
+    const prov: ProviderId = d?.provider && ok(d.provider) ? d.provider : ok("claude") ? "claude" : ok("codex") ? "codex" : ok("open") ? "open" : "claude"; setCfg(d?.provider === prov ? { provider: prov, model: d.model ?? null, effort: d.effort ?? null } : { provider: prov, model: null, effort: null }); setReady(true); }, [defs, cl, cx, op, ready]);
   return [cfg, setCfg, ready];
 }
